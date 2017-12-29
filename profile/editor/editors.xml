@@ -1,0 +1,73 @@
+<editors>
+  <!-- Boolean -->
+  <editor id="bool">
+    <range uom="2" />
+  </editor>
+
+  <!-- Rachio OnOff editor -->
+  <editor id="onoff">
+    <range uom="78" subset="0,100" />
+  </editor>
+
+  <!-- Rachio TrueFalse editor -->
+  <editor id="truefalse">
+    <range uom="2" subset="0,1" />
+  </editor>
+
+  <!-- Rachio Minutes editor -->
+  <editor id="minutes">
+    <range uom="45" min="0" max="255" prec="1" step="1" />
+  </editor>
+  <editor id="minuteslng">
+    <range uom="45" min="0" max="20160" prec="1" step="720" />
+  </editor>
+
+  <!-- Rachio Rain Delay editor -->
+  <editor id="raindelay">
+    <range uom="45" min="0" max="10080" prec="1" step="720" />
+  </editor>
+
+  <!-- Rachio Zone Number editor -->
+  <editor id="zonenum">
+    <range uom="56" min="0" max="8" prec="0" step="1" />
+  </editor>
+
+  <!-- Rachio Zone Number editor -->
+  <editor id="cycle">
+    <range uom="56" min="0" max="255" prec="0" step="1" />
+  </editor>
+
+  <!-- Rachio Inches editor -->
+  <editor id="inches">
+    <range uom="45" min="0" max="12" prec="2" step="0.1" />
+  </editor>
+  <editor id="inchhr">
+    <range uom="24" min="0" max="12" prec="2" step="0.1" />
+  </editor>
+
+  <!-- Rachio Percent editor -->
+  <editor id="pct">
+    <range uom="51" min="0" max="100" prec="0" step="1" />
+  </editor>
+
+  <!-- Rachio Square Feet editor -->
+  <editor id="sqft">
+    <range uom="18" min="0" max="20000" prec="0" step="200" />
+  </editor>
+
+  <!-- Rachio Seasonal Adjustment editor -->
+  <editor id="seasonal">
+    <range uom="51" min="-100" max="100" prec="0" step="1" />
+  </editor>
+
+  <!-- Rachio Run Types (Manual vs. Automatic) -->
+  <editor id="runtypes">
+    <range uom="25" subset="0-3" nls="RUN_TYPES" />
+  </editor>
+
+  <!-- Rachio Schedule Types (Fixed vs. Flex) -->
+  <editor id="schedtypes">
+    <range uom="25" subset="0-3" nls="SCHED_TYPES" />
+  </editor>
+
+</editors>

@@ -1,0 +1,21 @@
+{
+  "name": "Rachio",
+  "docs": "https://github.com/fahrer16/udi-rachio-poly",
+  "type": "python3",
+  "executable": "rachio-poly.py",
+  "install": "install.sh",
+  "description": "Rachio NodeServer for UDI ISY994i Polyglot v2",
+  "notice": "\"Rachio\" is trademarked., see https://rachio.readme.io/docs/getting-started for more information. This Node Server is neither developed by nor endorsed by Rachio, Universal Devices, Brian Feeney, or any other company responsible for the manufacture, development, or distribution of Rachio irrigation controllers.",
+  "shortPoll": "5",
+  "longPoll": "60",
+  "credits": [
+    {
+      "title": "udi-Poly-Rachio: Rachio NodeServer for UDI ISY994i Polyglot v2",
+      "author": "Brian Feeney",
+      "version": "2.0.0",
+      "date": "December 29, 2017",
+      "source": "https://github.com/fahrer16/udi-rachio-poly",
+      "license": "https://raw.githubusercontent.com/fahrer16/udi-rachio-poly/master/LICENSE"
+    }
+  ]
+}
