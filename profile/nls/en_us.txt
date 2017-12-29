@@ -1,6 +1,7 @@
 # RachioBridge (Virtual Cloud Interface)
 ND-rachio-NAME = Rachio Bridge
 ND-rachio-ICON = Irrigation
+ST-rapi-ST-NAME = Node Server Connected
 CMD-rapi-DISCOVER-NAME = Discover
 
 # RachioController
