@@ -80,6 +80,11 @@ class Controller(polyinterface.Controller):
         except Exception as ex:
             LOGGER.error('Error running query on %s: %s', self.name, str(ex))
 
+    def discoverCMD(self, command=None):
+        # This is command called by ISY discover button
+        for node in self.nodes:
+            self.nodes[node].discover()
+
     def discover(self, command=None):
         LOGGER.info('Starting discovery on %s', self.name)
         try:
@@ -102,42 +107,10 @@ class Controller(polyinterface.Controller):
                 _address = str(d['macAddress']).lower()
                 if _address not in self.nodes:
                     LOGGER.info('Adding Rachio Controller: %s(%s)', _name, _address)
-                    self.addNode(RachioController(self, self.address, _address, _name, d))
+                    self.addNode(RachioController(self, _address, _address, _name, d))
 
-
-                _zones = d['zones']
-                LOGGER.info('%i Rachio zones found on "%s" controller. Adding to ISY', len(_zones), _name)
-                for z in _zones:
-                    _zone_id = str(z['id'])
-                    _zone_num = str(z['zoneNumber'])
-                    _zone_addr = _address + _zone_num #construct address for this zone (mac address of controller appended with zone number) because ISY limit is 14 characters
-                    _zone_name = str(z['name'])
-                    if _zone_addr not in self.nodes:
-                        LOGGER.info('Adding new Rachio Zone to %s Controller, %s(%s)',_name, _zone_name, _zone_addr)
-                        self.addNode(RachioZone(self, self.address, _zone_addr, _zone_name, z, _device_id))
-            
-                _schedules = d['scheduleRules']
-                LOGGER.info('%i Rachio schedules found on "%s" controller. Adding to ISY', len(_schedules), _name)
-                for s in _schedules:
-                    _sched_id = str(s['id'])
-                    _sched_addr = _address + _sched_id[-2:] #construct address for this schedule (mac address of controller appended with last 2 characters of schedule unique id) because ISY limit is 14 characters
-                    _sched_name = str(s['name'])
-                    if _sched_addr not in self.nodes:
-                        LOGGER.info('Adding new Rachio Schedule to %s Controller, %s(%s)',_name, _sched_name, _sched_addr)
-                        self.addNode(RachioSchedule(self, self.address, _sched_addr, _sched_name, s, _device_id))
-
-
-                _flex_schedules = d['flexScheduleRules']
-                LOGGER.info('%i Rachio Flex schedules found on "%s" controller. Adding to ISY', len(_flex_schedules), _name)
-                for f in _flex_schedules:
-                    _flex_sched_id = str(f['id'])
-                    _flex_sched_addr = _address + _flex_sched_id[-2:] #construct address for this schedule (mac address of controller appended with last 2 characters of schedule unique id) because ISY limit is 14 characters
-                    _flex_sched_name = str(f['name'])
-                    if _flex_sched_addr not in self.nodes:
-                        LOGGER.info('Adding new Rachio Flex Schedule to %s Controller, %s(%s)',_name, _flex_sched_name, _flex_sched_addr)
-                        self.addNode(RachioFlexSchedule(self, self.address, _flex_sched_addr, _flex_sched_name, f, _device_id))
         except Exception as ex:
-            LOGGER.error('Error during Rachio discovery: %s', str(ex))
+            LOGGER.error('Error during Rachio device discovery: %s', str(ex))
 
         return True
 
@@ -145,17 +118,18 @@ class Controller(polyinterface.Controller):
         LOGGER.info('Deleting %s', self.name)
 
     id = 'rachio'
-    commands = {'DISCOVER': discover}
+    commands = {'DISCOVER': discoverCMD}
     drivers = [{'driver': 'ST', 'value': 0, 'uom': 2}]
 
 
 class RachioController(polyinterface.Node):
     def __init__(self, parent, primary, address, name, device):
         super().__init__(parent, primary, address, name)
+        self.isPrimary = True
+        self.primary = primary
+        self.parent = parent
         self.device = device
         self.device_id = device['id']
-        self.name = name
-        self.address = address
         self.rainDelay_minutes_remaining = 0
         self.currentSchedule = []
         self.scheduleItems = []
@@ -172,6 +146,55 @@ class RachioController(polyinterface.Node):
 
     def start(self):
         self.update_info(force=True)
+        self.discover()
+
+    def discover(self, command=None):
+        _success = True
+        LOGGER.info('Discovering nodes on Rachio Controller %s (%s)', self.name, self.address)
+        try:
+            _zones = self.device['zones']
+            LOGGER.info('%i Rachio zones found on "%s" controller. Adding to ISY', len(_zones), self.name)
+            for z in _zones:
+                _zone_id = str(z['id'])
+                _zone_num = str(z['zoneNumber'])
+                _zone_addr = self.address + _zone_num #construct address for this zone (mac address of controller appended with zone number) because ISY limit is 14 characters
+                _zone_name = str(z['name'])
+                if _zone_addr not in self.parent.nodes:
+                    LOGGER.info('Adding new Rachio Zone to %s Controller, %s(%s)', self.name, _zone_name, _zone_addr)
+                    self.parent.addNode(RachioZone(self.parent, self.address, _zone_addr, _zone_name, z, self.device_id))
+        except Exception as ex:
+            _success = False
+            LOGGER.error('Error discovering and adding Zones on Rachio Controller %s (%s): %s', self.name, self.address, str(ex))
+        
+        try:
+            _schedules = self.device['scheduleRules']
+            LOGGER.info('%i Rachio schedules found on "%s" controller. Adding to ISY', len(_schedules), self.name)
+            for s in _schedules:
+                _sched_id = str(s['id'])
+                _sched_addr = self.address + _sched_id[-2:] #construct address for this schedule (mac address of controller appended with last 2 characters of schedule unique id) because ISY limit is 14 characters
+                _sched_name = str(s['name'])
+                if _sched_addr not in self.parent.nodes:
+                    LOGGER.info('Adding new Rachio Schedule to %s Controller, %s(%s)', self.name, _sched_name, _sched_addr)
+                    self.parent.addNode(RachioSchedule(self.parent, self.address, _sched_addr, _sched_name, s, self.device_id))
+        except Exception as ex:
+            _success = False
+            LOGGER.error('Error discovering and adding Schedules on Rachio Controller %s (%s): %s', self.name, self.address, str(ex))
+
+        try:
+            _flex_schedules = self.device['flexScheduleRules']
+            LOGGER.info('%i Rachio Flex schedules found on "%s" controller. Adding to ISY', len(_flex_schedules), self.name)
+            for f in _flex_schedules:
+                _flex_sched_id = str(f['id'])
+                _flex_sched_addr = self.address + _flex_sched_id[-2:] #construct address for this schedule (mac address of controller appended with last 2 characters of schedule unique id) because ISY limit is 14 characters
+                _flex_sched_name = str(f['name'])
+                if _flex_sched_addr not in self.parent.nodes:
+                    LOGGER.info('Adding new Rachio Flex Schedule to %s Controller, %s(%s)',self.name, _flex_sched_name, _flex_sched_addr)
+                    self.parent.addNode(RachioFlexSchedule(self.parent, self.address, _flex_sched_addr, _flex_sched_name, f, self.device_id))
+        except Exception as ex:
+            _success = False
+            LOGGER.error('Error discovering and adding Flex Schedules on Rachio Controller %s (%s): %s', self.name, self.address, str(ex))
+
+        return _success
 
     def update_info(self, force=False):
         _running = False #initialize variable so that it could be used even if there was not a need to update the running status of the controller
@@ -460,6 +483,10 @@ class RachioZone(polyinterface.Node):
     def start(self):
         self.update_info(force=True)
 
+    def discover(self, command=None):
+        # No discovery needed (no nodes are subordinate to Zones)
+        pass
+
     def update_info(self, force=False): #setting "force" to "true" updates drivers even if the value hasn't changed
         _running = False #initialize variable so that it could be used even if there was not a need to update the running status of the zone
         LOGGER.debug('Updating info for zone %s with id %s, force=%s',self.address, str(self.zone_id), str(force))
@@ -641,6 +668,10 @@ class RachioSchedule(polyinterface.Node):
 
     def start(self):
         self.update_info(force=True)
+
+    def discover(self, command=None):
+        # No discovery needed (no nodes are subordinate to Schedules)
+        pass
         
     def update_info(self, force=False): #setting "force" to "true" updates drivers even if the value hasn't changed
         _running = False #initialize variable so that it could be used even if there was not a need to update the running status of the schedule
@@ -803,6 +834,10 @@ class RachioFlexSchedule(polyinterface.Node):
 
     def start(self):
         self.update_info(force=True)
+
+    def discover(self, command=None):
+        # No discovery needed (no nodes are subordinate to Flex Schedules)
+        pass
 
     def update_info(self, force=False): #setting "force" to "true" updates drivers even if the value hasn't changed
         _running = False #initialize variable so that it could be used even if there was not a need to update the running status of the schedule
