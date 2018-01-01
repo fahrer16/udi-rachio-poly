@@ -9,7 +9,7 @@ This node server currently implements the Person, Device, and Zone leaves of the
 
 # Installation Instructions:
 1. Backup ISY (just in case)
-2. Clone the MagicHome Node Server into the /.polyglot/nodeservers folder for the user that runs polyglot v2:
+2. Clone the Rachio Node Server into the /.polyglot/nodeservers folder for the user that runs polyglot v2:
 `Assuming you're logged in as the user that runs polyglot, cd cd ~/.polyglot/nodeservers
 `git clone https://github.com/fahrer16/udi-rachio-poly.git
 3. Install pre-requisites using install.sh script
