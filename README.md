@@ -22,9 +22,9 @@ Any Rachio units associated with the specified API key should now show up in the
  
 ## Version History:
 2.0.0: Rewritten for Polyglot v2.
+2.1.0: Updated to have each Rachio Device be a primary node
 
 ## Known Issues:
-1. Icons for Rachio Nodes should show up as Irrigation but show up as Bulb.  Appears to be issue with ISY994i not accepting Irrigation icon type from NLS definition.
-2. All Rachio controllers were previously added as parent nodes in previous version but Polyglot V2 does not appear to allow multiple parents.  All nodes are now added under "Rachio Bridge" node representing link to Polyglot.  This probably won't matter unless you have more than one Rachio controller.
-3. All node status fields don't seem to be populated initially, possible due to the large number of statuses getting updated simultaneously.  Querying each node separately seems to work fine.
-4. Commands that allow for a parameter value to be passed don't seem to be present in admin console unless the profile is uploaded twice.  May be an issue with ISY994i (This was developed using version 5.0.10E).
+1. Icons for Rachio Nodes should show up as Irrigation but show up as Bulb.  Appears to be an issue with ISY994i not accepting Irrigation icon type from NLS definition.
+2. All node status fields don't seem to be populated initially, possible due to the large number of statuses getting updated simultaneously.  Querying each node separately seems to work fine.
+3. Commands that allow for a parameter value to be passed don't seem to be present in admin console unless the profile is uploaded twice.  May be an issue with ISY994i (This was developed using version 5.0.10E).
