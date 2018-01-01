@@ -21,8 +21,8 @@ This node server currently implements the Person, Device, and Zone leaves of the
 Any Rachio units associated with the specified API key should now show up in the ISY, hit "Query" if the status fields are empty.  
  
 ## Version History:
-2.0.0: Rewritten for Polyglot v2.
-2.1.0: Updated to have each Rachio Device be a primary node
+*2.0.0: Rewritten for Polyglot v2.
+*2.1.0: Updated to have each Rachio Device be a primary node
 
 ## Known Issues:
 1. Icons for Rachio Nodes should show up as Irrigation but show up as Bulb.  Appears to be an issue with ISY994i not accepting Irrigation icon type from NLS definition.
