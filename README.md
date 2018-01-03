@@ -19,10 +19,15 @@ This node server currently implements the Person, Device, and Zone leaves of the
   * Follow instructions here, starting with "Open Polyglot": https://github.com/Einstein42/udi-polyglotv2/wiki/Creating-a-NodeServer 
 
 Any Rachio units associated with the specified API key should now show up in the ISY, hit "Query" if the status fields are empty.  
+
+## Polyglot Custom Configuration Parameters
+* REQUIRED: Key:'api_key' Value: See "https://rachio.readme.io/v1.0/docs" for instructions on how to obtain Rachio API Key.
+* OPTIONAL: Key:'nodeAdditionInterval' Value: On discovery, nodes will be added at this interval (in seconds).
  
 ## Version History:
 * 2.0.0: Rewritten for Polyglot v2.
 * 2.1.0: Updated to have each Rachio Device be a primary node
+* 2.2.0: Added node addition queue with a default interval of 1 second and removed forced Driver reporting to improve performance in large installs.
 
 ## Known Issues:
 1. Icons for Rachio Nodes should show up as Irrigation but show up as Bulb.  Appears to be an issue with ISY994i not accepting Irrigation icon type from NLS definition.

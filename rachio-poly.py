@@ -9,6 +9,7 @@ import sys
 from socket import error as socket_error
 from copy import deepcopy
 import json, time
+from threading import Timer #Added version 2.2.0 for node addition queue
 from rachiopy import Rachio
  
 LOGGER = polyinterface.LOGGER
@@ -41,9 +42,13 @@ class Controller(polyinterface.Controller):
                   which never happens.
     """
     def __init__(self, polyglot):
-        self.name = 'Rachio Bridge'
-        self.initialUpdateRequired = True
         super(Controller, self).__init__(polyglot)
+        self.name = 'Rachio Bridge'
+        #Queue for nodes to be added in order to prevent a flood of nodes from being created on discovery.  Added version 2.2.0
+        self.nodeQueue = {}
+        _msg = "Connection timer created for node addition queue"
+        self.timer = Timer(1,LOGGER.debug,[_msg])
+        self.nodeAdditionInterval = 1
 
     def start(self):
         LOGGER.info('Starting Rachio Polyglot v2 NodeServer version {}'.format(VERSION))
@@ -54,8 +59,22 @@ class Controller(polyinterface.Controller):
                 LOGGER.error('Rachio API key required in order to establish connection.  Enter custom parameter of \'api_key\' in Polyglot configuration.  See "https://rachio.readme.io/v1.0/docs" for instructions on how to obtain Rachio API Key.')
                 return False
         except Exception as ex:
-            LOGGER.error('Error reading Rachio API Key from Polyglot Configuration: %s', self(ex))
+            LOGGER.error('Error reading Rachio API Key from Polyglot Configuration: %s', str(ex))
             return False
+
+        #Get Node Addition Interval from Polyglot Configuration (Added version 2.2.0)
+        try:
+            if 'nodeAdditionInterval' in self.polyConfig['customParams']:
+                _nodeAdditionInterval = self.polyConfig['customParams']['nodeAdditionInterval']
+                if _nodeAdditionInterval >= 0 and _nodeAdditionInterval <= 60:
+                    self.nodeAdditionInterval = _nodeAdditionInterval
+                else:
+                    LOGGER.error('Node Addition Interval configured but outside of permissible range of 0 - 60 seconds, defaulting to %s second(s)', str(self.nodeAdditionInterval))
+            else:
+                LOGGER.info('Node Addition Interval not configured, defaulting to %s second(s).  If a different time is needed, enter a custom parameter with a key of \'nodeAdditionInterval\' and a value in seconds in order to change interval.', str(self.nodeAdditionInterval))
+        except Exception as ex:
+            LOGGER.error('Error reading Rachio Node Addition Interval from Polyglot Configuration: %s', str(ex))
+
         self.discover()
 
     def shortPoll(self):
@@ -64,8 +83,7 @@ class Controller(polyinterface.Controller):
     def longPoll(self):
         try:
             for node in self.nodes:
-                self.nodes[node].update_info(force=self.initialUpdateRequired) #Do a full update for all nodes on the first longPoll after everything has had a chance to settle down following the initial discovery
-            self.initialUpdateRequired = False
+                self.nodes[node].update_info()
         except Exception as ex:
             LOGGER.error('Error running longPoll on %s: %s', self.name, str(ex))
 
@@ -106,13 +124,54 @@ class Controller(polyinterface.Controller):
                 _name = str(d['name'])
                 _address = str(d['macAddress']).lower()
                 if _address not in self.nodes:
-                    LOGGER.info('Adding Rachio Controller: %s(%s)', _name, _address)
-                    self.addNode(RachioController(self, _address, _address, _name, d))
+                    #LOGGER.info('Adding Rachio Controller: %s(%s)', _name, _address)
+                    self.addNodeQueue(RachioController(self, _address, _address, _name, d))
 
         except Exception as ex:
             LOGGER.error('Error during Rachio device discovery: %s', str(ex))
 
         return True
+
+    def addNodeQueue(self, node):
+        #If node is not already in ISY, add the node.  Otherwise, queue it for addition and start the interval timer.  Added version 2.2.0
+        try:
+            LOGGER.debug('Request received to add node: %s (%s)', node.name, node.address)
+            #if not self.poly.getNode(node.address):
+            self.nodeQueue[node.address] = node
+            self._startNodeAdditionDelayTimer()
+            #else:
+            #    self.addNode(node)
+        except Exception as ex:
+            LOGGER.error('Error queuing node for addition: %s'. str(ex))
+
+    def _startNodeAdditionDelayTimer(self): #Added version 2.2.0
+        try:
+            if self.timer is not None:
+                self.timer.cancel()
+            self.timer = Timer(self.nodeAdditionInterval, self._addNodesFromQueue)
+            self.timer.start()
+            LOGGER.debug("Starting node addition delay timer for %s second(s)", str(self.nodeAdditionInterval))
+            return True
+        except Exception as ex:
+            LOGGER.error('Error starting node addition delay timer: %s', str(ex))
+            return False
+
+    def _addNodesFromQueue(self): #Added version 2.2.0
+        try:
+            if len(self.nodeQueue) > 0:
+                for _address in self.nodeQueue:
+                    LOGGER.debug('Adding %s(%s) from queue', self.name, self.address)
+                    self.addNode(self.nodeQueue[_address])
+                    del self.nodeQueue[_address]
+                    break #only add one node at a time
+        
+            if len(self.nodeQueue) > 0: #Check for more nodes after addition, if there are more to addd, restart the timer
+                self._startNodeAdditionDelayTimer()
+            else:
+                LOGGER.info('No nodes pending addition')
+        except Exception as ex:
+            LOGGER.error('Error encountered adding node from queue: %s', str(ex))
+
 
     def delete(self):
         LOGGER.info('Deleting %s', self.name)
@@ -145,7 +204,7 @@ class RachioController(polyinterface.Node):
                               3: "OTHER"}
 
     def start(self):
-        self.update_info(force=True)
+        self.update_info()
         self.discover()
 
     def discover(self, command=None):
@@ -160,8 +219,8 @@ class RachioController(polyinterface.Node):
                 _zone_addr = self.address + _zone_num #construct address for this zone (mac address of controller appended with zone number) because ISY limit is 14 characters
                 _zone_name = str(z['name'])
                 if _zone_addr not in self.parent.nodes:
-                    LOGGER.info('Adding new Rachio Zone to %s Controller, %s(%s)', self.name, _zone_name, _zone_addr)
-                    self.parent.addNode(RachioZone(self.parent, self.address, _zone_addr, _zone_name, z, self.device_id))
+                    #LOGGER.info('Adding new Rachio Zone to %s Controller, %s(%s)', self.name, _zone_name, _zone_addr)
+                    self.parent.addNodeQueue(RachioZone(self.parent, self.address, _zone_addr, _zone_name, z, self.device_id)) #v2.2.0, updated to add node to queue, rather that adding to ISY immediately
         except Exception as ex:
             _success = False
             LOGGER.error('Error discovering and adding Zones on Rachio Controller %s (%s): %s', self.name, self.address, str(ex))
@@ -174,8 +233,8 @@ class RachioController(polyinterface.Node):
                 _sched_addr = self.address + _sched_id[-2:] #construct address for this schedule (mac address of controller appended with last 2 characters of schedule unique id) because ISY limit is 14 characters
                 _sched_name = str(s['name'])
                 if _sched_addr not in self.parent.nodes:
-                    LOGGER.info('Adding new Rachio Schedule to %s Controller, %s(%s)', self.name, _sched_name, _sched_addr)
-                    self.parent.addNode(RachioSchedule(self.parent, self.address, _sched_addr, _sched_name, s, self.device_id))
+                    #LOGGER.info('Adding new Rachio Schedule to %s Controller, %s(%s)', self.name, _sched_name, _sched_addr)
+                    self.parent.addNodeQueue(RachioSchedule(self.parent, self.address, _sched_addr, _sched_name, s, self.device_id)) #v2.2.0, updated to add node to queue, rather that adding to ISY immediately
         except Exception as ex:
             _success = False
             LOGGER.error('Error discovering and adding Schedules on Rachio Controller %s (%s): %s', self.name, self.address, str(ex))
@@ -188,8 +247,8 @@ class RachioController(polyinterface.Node):
                 _flex_sched_addr = self.address + _flex_sched_id[-2:] #construct address for this schedule (mac address of controller appended with last 2 characters of schedule unique id) because ISY limit is 14 characters
                 _flex_sched_name = str(f['name'])
                 if _flex_sched_addr not in self.parent.nodes:
-                    LOGGER.info('Adding new Rachio Flex Schedule to %s Controller, %s(%s)',self.name, _flex_sched_name, _flex_sched_addr)
-                    self.parent.addNode(RachioFlexSchedule(self.parent, self.address, _flex_sched_addr, _flex_sched_name, f, self.device_id))
+                    #LOGGER.info('Adding new Rachio Flex Schedule to %s Controller, %s(%s)',self.name, _flex_sched_name, _flex_sched_addr)
+                    self.parent.addNodeQueue(RachioFlexSchedule(self.parent, self.address, _flex_sched_addr, _flex_sched_name, f, self.device_id)) #v2.2.0, updated to add node to queue, rather that adding to ISY immediately
         except Exception as ex:
             _success = False
             LOGGER.error('Error discovering and adding Flex Schedules on Rachio Controller %s (%s): %s', self.name, self.address, str(ex))
@@ -379,7 +438,7 @@ class RachioController(polyinterface.Node):
         
         self.device = _device
         self.currentSchedule = _currentSchedule
-        if force: self.reportDrivers()
+        #if force: self.reportDrivers() Removed v2.2.0
         return True
 
     def query(self, command = None):
@@ -481,7 +540,7 @@ class RachioZone(polyinterface.Node):
         self._tries = 0
 
     def start(self):
-        self.update_info(force=True)
+        self.update_info()
 
     def discover(self, command=None):
         # No discovery needed (no nodes are subordinate to Zones)
@@ -606,7 +665,7 @@ class RachioZone(polyinterface.Node):
         
         self.zone = _zone
         self.currentSchedule = _currentSchedule
-        if force: self.reportDrivers()
+        #if force: self.reportDrivers() Removed v2.2.0
         return True
 
     def query(self, command = None):
@@ -667,7 +726,7 @@ class RachioSchedule(polyinterface.Node):
         self._tries = 0
 
     def start(self):
-        self.update_info(force=True)
+        self.update_info()
 
     def discover(self, command=None):
         # No discovery needed (no nodes are subordinate to Schedules)
@@ -754,7 +813,7 @@ class RachioSchedule(polyinterface.Node):
 
         self.schedule = _schedule
         self.currentSchedule = _currentSchedule
-        if force: self.reportDrivers()
+        #if force: self.reportDrivers() Removed v2.2.0
         return True
         
     def query(self, command = None):
@@ -833,7 +892,7 @@ class RachioFlexSchedule(polyinterface.Node):
         self._tries = 0
 
     def start(self):
-        self.update_info(force=True)
+        self.update_info()
 
     def discover(self, command=None):
         # No discovery needed (no nodes are subordinate to Flex Schedules)
@@ -885,7 +944,7 @@ class RachioFlexSchedule(polyinterface.Node):
 
         self.schedule = _schedule
         self.currentSchedule = _currentSchedule
-        self.reportDrivers()
+        #self.reportDrivers() Removed v2.2.0
         return True
 
         # GV4 -> Minutes until next automatic schedule start
@@ -910,7 +969,7 @@ class RachioFlexSchedule(polyinterface.Node):
         except Exception as ex:
             LOGGER.error('Error trying to retrieve minutes remaining until next run of %s Rachio FlexSchedule. %s', self.name, str(ex))
         
-        if force: self.reportDrivers()
+        #if force: self.reportDrivers() Removed v2.2.0
 
     def query(self, command = None):
         LOGGER.info('query command received on %s Rachio Flex Schedule', self.name)
