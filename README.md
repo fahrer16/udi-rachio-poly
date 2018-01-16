@@ -33,5 +33,4 @@ Any Rachio units associated with the specified API key should now show up in the
 
 ## Known Issues:
 1. Icons for Rachio Nodes should show up as Irrigation but show up as Bulb.  Appears to be an issue with ISY994i not accepting Irrigation icon type from NLS definition.
-2. All node status fields don't seem to be populated initially, possible due to the large number of statuses getting updated simultaneously.  Querying each node separately seems to work fine.
-3. Commands that allow for a parameter value to be passed don't seem to be present in admin console unless the profile is uploaded twice.  May be an issue with ISY994i (This was developed using version 5.0.10E).
+2. Commands that allow for a parameter value to be passed don't seem to be present in admin console unless the profile is uploaded twice.  May be an issue with ISY994i (This was developed using version 5.0.10E).
