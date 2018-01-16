@@ -28,6 +28,8 @@ Any Rachio units associated with the specified API key should now show up in the
 * 2.0.0: Rewritten for Polyglot v2.
 * 2.1.0: Updated to have each Rachio Device be a primary node
 * 2.2.0: Added node addition queue with a default interval of 1 second and removed forced Driver reporting to improve performance in large installs.
+* 2.2.1: Corrected "bool" definition in editor profile
+* 2.3.0: Simplified driver update logic
 
 ## Known Issues:
 1. Icons for Rachio Nodes should show up as Irrigation but show up as Bulb.  Appears to be an issue with ISY994i not accepting Irrigation icon type from NLS definition.

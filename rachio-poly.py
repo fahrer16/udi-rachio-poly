@@ -136,11 +136,8 @@ class Controller(polyinterface.Controller):
         #If node is not already in ISY, add the node.  Otherwise, queue it for addition and start the interval timer.  Added version 2.2.0
         try:
             LOGGER.debug('Request received to add node: %s (%s)', node.name, node.address)
-            #if not self.poly.getNode(node.address):
             self.nodeQueue[node.address] = node
             self._startNodeAdditionDelayTimer()
-            #else:
-            #    self.addNode(node)
         except Exception as ex:
             LOGGER.error('Error queuing node for addition: %s'. str(ex))
 
@@ -177,7 +174,7 @@ class Controller(polyinterface.Controller):
         LOGGER.info('Deleting %s', self.name)
 
     id = 'rachio'
-    commands = {'DISCOVER': discoverCMD}
+    commands = {'DISCOVER': discoverCMD, 'QUERY': query}
     drivers = [{'driver': 'ST', 'value': 0, 'uom': 2}]
 
 
@@ -259,11 +256,9 @@ class RachioController(polyinterface.Node):
         _running = False #initialize variable so that it could be used even if there was not a need to update the running status of the controller
         try:
             #Get latest device info and populate drivers
-            _device = self.parent.r_api.device.get(self.device_id)[1]
-            self.device = _device
+            self.device = self.parent.r_api.device.get(self.device_id)[1]
             
-            _currentSchedule = self.parent.r_api.device.getCurrentSchedule(self.device_id)[1]
-            if self.currentSchedule == []: self.currentSchedule = _currentSchedule
+            self.currentSchedule = self.parent.r_api.device.getCurrentSchedule(self.device_id)[1]
 
         except Exception as ex:
             LOGGER.error('Connection Error on %s Rachio Controller refreshState. This could mean an issue with internet connectivity or Rachio servers, normally safe to ignore. %s', self.name, str(ex))
@@ -271,15 +266,9 @@ class RachioController(polyinterface.Node):
             
         # ST -> Status (whether Rachio is running a schedule or not)
         try:
-            if 'status' in _currentSchedule and 'status' in self.currentSchedule:
-                if (_currentSchedule['status'] != self.currentSchedule['status']):
-                    _running = (str(_currentSchedule['status']) == "PROCESSING")
-                    self.setDriver('ST',(0,100)[_running])
-            elif 'status' in _currentSchedule: #There was no schedule last time we checked but there is now, update ISY:
+            if 'status' in self.currentSchedule:
                 _running = (str(_currentSchedule['status']) == "PROCESSING")
                 self.setDriver('ST',(0,100)[_running])
-            elif 'status' in self.currentSchedule: #there was a schedule last time but there isn't now, update ISY:
-                self.setDriver('ST',0)
             else:
                 self.setDriver('ST',0)
         except Exception as ex:
@@ -287,45 +276,41 @@ class RachioController(polyinterface.Node):
 
         # GV0 -> "Connected"
         try:
-            if force or (_device['status'] != self.device['status']):
-                _connected = (_device['status'] == "ONLINE")
-                self.setDriver('GV0',int(_connected))
+            _connected = (self.device['status'] == "ONLINE")
+            self.setDriver('GV0',int(_connected))
         except Exception as ex:
             self.setDriver('GV0',0)
             LOGGER.error('Error updating connection status on %s Rachio Controller. %s', self.name, str(ex))
 
         # GV1 -> "Enabled"
         try:
-            if force or (_device['on'] != self.device['on']):
-                self.setDriver('GV1',int(_device['on']))
+            self.setDriver('GV1',int(self.device['on']))
         except Exception as ex:
             self.setDriver('GV1',0)
             LOGGER.error('Error updating status on %s Rachio Controller. %s', self.name, str(ex))
 
         # GV2 -> "Paused"
         try:
-            if force or (_device['paused'] != self.device['paused']):
-                self.setDriver('GV2', int(_device['paused']))
+            self.setDriver('GV2', int(self.device['paused']))
         except Exception as ex:
             LOGGER.error('Error updating paused status on %s Rachio Controller. %s', self.name, str(ex))
 
         # GV3 -> "Rain Delay Remaining" in Minutes
         try:
-            if 'rainDelayExpirationDate' in _device: 
+            if 'rainDelayExpirationDate' in self.device: 
                 _current_time = int(time.time())
-                _rainDelayExpiration = _device['rainDelayExpirationDate'] / 1000.
+                _rainDelayExpiration = self.device['rainDelayExpirationDate'] / 1000.
                 _rainDelay_minutes_remaining = int(max(_rainDelayExpiration - _current_time,0) / 60.)
-                if force or (_rainDelay_minutes_remaining != self.rainDelay_minutes_remaining):
-                    self.setDriver('GV3', _rainDelay_minutes_remaining)
-                    self.rainDelay_minutes_remaining = _rainDelay_minutes_remaining
-            elif force: self.setDriver('GV3', 0)
+                self.setDriver('GV3', _rainDelay_minutes_remaining)
+                self.rainDelay_minutes_remaining = _rainDelay_minutes_remaining
+            else: self.setDriver('GV3', 0)
         except Exception as ex:
             LOGGER.error('Error updating remaining rain delay duration on %s Rachio Controller. %s', self.name, str(ex))
         
         # GV10 -> Active Run Type
         try:
-            if 'type' in _currentSchedule: # True when a schedule is running
-                _runType = _currentSchedule['type']
+            if 'type' in self.currentSchedule: # True when a schedule is running
+                _runType = self.currentSchedule['type']
                 _runVal = 3 #default to "OTHER"
                 for key in self.runTypes:
                     if self.runTypes[key].lower() == _runType.lower():
@@ -333,35 +318,26 @@ class RachioController(polyinterface.Node):
                         break
                 self.setDriver('GV10', _runVal)
             else: 
-                self.setDriver('GV10', 0, report=force)
+                self.setDriver('GV10', 0)
         except Exception as ex:
             LOGGER.error('Error updating active run type on %s Rachio Controller. %s', self.name, str(ex))
 
         # GV4 -> Active Zone #
-        if 'zoneId' in _currentSchedule and  'zoneId' in self.currentSchedule:
-            if force or (_currentSchedule['zoneId'] != self.currentSchedule['zoneId']):
-                try:
-                    _active_zone = self.parent.r_api.zone.get(_currentSchedule['zoneId'])[1]
-                    self.setDriver('GV4',_active_zone['zoneNumber'])
-                except Exception as ex:
-                    LOGGER.error('Error updating active zone on %s Rachio Controller. %s', self.name, str(ex))
-        elif 'zoneId' in self.currentSchedule: #there was a zone but now there's not, that must mean we're no longer watering and there's therefore no current zone #
-            self.setDriver('GV4',0)
-        elif 'zoneId' in _currentSchedule: #there's a zone now but there wasn't before, we can try to find the new zone #
+        if 'zoneId' in self.currentSchedule:
             try:
-                _active_zone = self.parent.r_api.zone.get(_currentSchedule['zoneId'])[1]
+                _active_zone = self.parent.r_api.zone.get(self.currentSchedule['zoneId'])[1]
                 self.setDriver('GV4',_active_zone['zoneNumber'])
             except Exception as ex:
-                LOGGER.error('Error updating new zone on %s Rachio Controller. %s', self.name, str(ex))
+                LOGGER.error('Error updating active zone on %s Rachio Controller. %s', self.name, str(ex))
         else: #no schedule running:
-            if force: self.setDriver('GV4',0)
+            self.setDriver('GV4',0)
         
         # GV5 -> Active Schedule remaining minutes and GV6 -> Active Schedule minutes elapsed
         try:
-            if 'startDate' in _currentSchedule and 'duration' in _currentSchedule:
+            if 'startDate' in self.currentSchedule and 'duration' in self.currentSchedule:
                 _current_time = int(time.time())
-                _start_time = int(_currentSchedule['startDate'] / 1000)
-                _duration = int(_currentSchedule['duration'])
+                _start_time = int(self.currentSchedule['startDate'] / 1000)
+                _duration = int(self.currentSchedule['duration'])
 
                 _seconds_elapsed = max(_current_time - _start_time,0)
                 _minutes_elapsed = round(_seconds_elapsed / 60. ,1)
@@ -380,65 +356,53 @@ class RachioController(polyinterface.Node):
 
         # GV7 -> Cycling (true/false)
         try:
-            if 'cycling' in _currentSchedule and 'cycling' in self.currentSchedule:
-                if force or (_currentSchedule['cycling'] != self.currentSchedule['cycling']):
-                    self.setDriver('GV7',int(_currentSchedule['cycling']))
-            elif 'cycling' in _currentSchedule: #there's a schedule running now, but there wasn't last time we checked, update the ISY:
+            if 'cycling' in self.currentSchedule:
                 self.setDriver('GV7',int(_currentSchedule['cycling']))
-            elif force: self.setDriver('GV7', 0) #no schedule active
+            else: self.setDriver('GV7', 0) #no schedule active
         except Exception as ex:
             LOGGER.error('Error trying to retrieve cycling status on %s Rachio Controller. %s', self.name, str(ex))
         
         # GV8 -> Cycle Count
         try:
-            if 'cycleCount' in _currentSchedule and 'cycleCount' in self.currentSchedule:
-                if force or (_currentSchedule['cycleCount'] != self.currentSchedule['cycleCount']):
-                    self.setDriver('GV8',_currentSchedule['cycleCount'])
-            elif 'cycleCount' in _currentSchedule: #there's a schedule running now, but there wasn't last time we checked, update the ISY:
+            if 'cycleCount' in self.currentSchedule:
                 self.setDriver('GV8',_currentSchedule['cycleCount'])
-            elif force: self.setDriver('GV8',0) #no schedule active
+            else: self.setDriver('GV8',0) #no schedule active
         except Exception as ex:
             LOGGER.error('Error trying to retrieve cycle count on %s Rachio Controller. %s', self.name, str(ex))
 
         # GV9 -> Total Cycle Count
         try:
-            if 'totalCycleCount' in _currentSchedule and 'totalCycleCount' in self.currentSchedule:
-                if force or (_currentSchedule['totalCycleCount'] != self.currentSchedule['totalCycleCount']):
-                    self.setDriver('GV9',_currentSchedule['totalCycleCount'])
-            elif 'totalCycleCount' in _currentSchedule: #there's a schedule running now, but there wasn't last time we checked, update the ISY:
+            if 'totalCycleCount' in self.currentSchedule:
                 self.setDriver('GV9',_currentSchedule['totalCycleCount'])
-            elif force: self.setDriver('GV9',0) #no schedule active
+            else: self.setDriver('GV9',0) #no schedule active
         except Exception as ex:
             LOGGER.error('Error trying to retrieve total cycle count on %s Rachio Controller. %s', self.name, str(ex))
 
         # GV11 -> Minutes until next automatic schedule start
         # GV12 -> Type of next schedule (FLEX, or FIXED)
         try:
-            _scheduleItems = self.parent.r_api.device.getScheduleItem(self.device_id)[1]
-            if force or self.scheduleItems == []: self.scheduleItems = _scheduleItems
-            if len(_scheduleItems) > 0:
+            self.scheduleItems = self.parent.r_api.device.getScheduleItem(self.device_id)[1]
+            if len(self.scheduleItems) > 0:
                 _current_time = int(time.time())
-                _next_start_time = int(_scheduleItems[0]['absoluteStartDate'] / 1000.) #TODO: Looks like earliest schedule is always in the 0th element, but might need to actually loop through and check.
+                _next_start_time = int(self.scheduleItems[0]['absoluteStartDate'] / 1000.) #TODO: Looks like earliest schedule is always in the 0th element, but might need to actually loop through and check.
                 _seconds_remaining = max(_next_start_time - _current_time,0)
                 _minutes_remaining = round(_seconds_remaining / 60. ,1)
                 self.setDriver('GV11',_minutes_remaining)
 
-                _scheduleType = _scheduleItems[0]['scheduleType']
+                _scheduleType = self.scheduleItems[0]['scheduleType']
                 _scheduleVal = 3 #default to "OTHER" in case an unexpected item is returned (API documentation does not include exhaustive list of possibilities)
                 for key in self.scheduleTypes:
                     if self.scheduleTypes[key].lower() == _scheduleType.lower():
                         _scheduleVal = key
                         break
                 self.setDriver('GV12',_scheduleVal)
-            elif force: 
+            else: 
                 self.setDriver('GV11',0.0)
                 self.setDriver('GV12',0)
         except Exception as ex:
             LOGGER.error('Error trying to retrieve minutes remaining/type of next planned schedule on %s Rachio Controller. %s', self.name, str(ex))
         
-        self.device = _device
-        self.currentSchedule = _currentSchedule
-        #if force: self.reportDrivers() Removed v2.2.0
+        if force: self.reportDrivers()
         return True
 
     def query(self, command = None):
@@ -451,7 +415,7 @@ class RachioController(polyinterface.Node):
         while self._tries < 2: #TODO: the first command to the Rachio server fails frequently for some reason with an SSL WRONG_VERSION_NUMBER error.  This is a temporary workaround to try a couple of times before giving up
             try:
                 self.parent.r_api.device.on(self.device_id)
-                self.update_info(force=False) #update info but don't force updates to ISY if values haven't changed.
+                self.update_info()
                 LOGGER.info('Command received to enable %s Controller',self.name)
                 self._tries = 0
                 return True
@@ -465,7 +429,7 @@ class RachioController(polyinterface.Node):
         while self._tries < 2: #TODO: the first command to the Rachio server fails frequently for some reason with an SSL WRONG_VERSION_NUMBER error.  This is a temporary workaround to try a couple of times before giving up
             try:
                 self.parent.r_api.device.off(self.device_id)
-                self.update_info(force=False) #update info but don't force updates to ISY if values haven't changed.
+                self.update_info()
                 LOGGER.info('Command received to disable %s Controller',self.name)
                 self._tries = 0
                 return True
@@ -480,7 +444,7 @@ class RachioController(polyinterface.Node):
             try:
                 self.parent.r_api.device.stopWater(self.device_id)
                 LOGGER.info('Command received to stop watering on %s Controller',self.name)
-                self.update_info(force=False) #update info but don't force updates to ISY if values haven't changed.
+                self.update_info()
                 self._tries = 0
                 return True
             except Exception as ex:
@@ -499,7 +463,7 @@ class RachioController(polyinterface.Node):
                 try:
                     _seconds = int(_minutes * 60.)
                     self.parent.r_api.device.rainDelay(self.device_id, _seconds)
-                    self.update_info(force=False) #update info but don't force updates to ISY if values haven't changed.
+                    self.update_info()
                     LOGGER.info('Received rain Delay command on %s Rachio Controller for %s minutes', self.name, str(_minutes))
                     self._tries = 0
                     return True
@@ -546,126 +510,105 @@ class RachioZone(polyinterface.Node):
         # No discovery needed (no nodes are subordinate to Zones)
         pass
 
-    def update_info(self, force=False): #setting "force" to "true" updates drivers even if the value hasn't changed
+    def update_info(self, force=False):
         _running = False #initialize variable so that it could be used even if there was not a need to update the running status of the zone
-        LOGGER.debug('Updating info for zone %s with id %s, force=%s',self.address, str(self.zone_id), str(force))
+        #pdating info for zone %s with id %s, force=%s',self.address, str(self.zone_id), str(force))
         try:
             #Get latest zone info and populate drivers
-            _zone = self.parent.r_api.zone.get(self.zone_id)[1]
-            if force: self.zone = _zone
-            _currentSchedule = self.parent.r_api.device.getCurrentSchedule(self.device_id)[1]
-            if self.currentSchedule == []: self.currentSchedule = _currentSchedule
+            self.zone = self.parent.r_api.zone.get(self.zone_id)[1]
+            self.currentSchedule = self.parent.r_api.device.getCurrentSchedule(self.device_id)[1]
         except Exception as ex:
             LOGGER.error('Connection Error on %s Rachio zone. This could mean an issue with internet connectivity or Rachio servers, normally safe to ignore. %s', self.name, str(ex))
             return False
             
         # ST -> Status (whether Rachio zone is running a schedule or not)
         try:
-            if 'status' in _currentSchedule and 'zoneId' in _currentSchedule and 'status' in self.currentSchedule and 'zoneId' in self.currentSchedule:
-                if force or (_currentSchedule['status'] != self.currentSchedule['status']) or (_currentSchedule['zoneId'] != self.currentSchedule['zoneId']):
-                    _running = (str(_currentSchedule['status']) == "PROCESSING") and (_currentSchedule['zoneId'] == self.zone_id)
-                    self.setDriver('ST',(0,100)[_running])
-            elif 'status' in _currentSchedule and 'zoneId' in _currentSchedule: #there's a schedule running now, but there wasn't last time we checked, update the ISY:
-                _running = (str(_currentSchedule['status']) == "PROCESSING") and (_currentSchedule['zoneId'] == self.zone_id)
+            if 'status' in self.currentSchedule and 'zoneId' in self.currentSchedule:
+                _running = (str(self.currentSchedule['status']) == "PROCESSING") and (self.currentSchedule['zoneId'] == self.zone_id)
                 self.setDriver('ST',(0,100)[_running])
-            elif 'status' in self.currentSchedule and 'zoneId' in self.currentSchedule: #schedule stopped running since last time, update the ISY:
-                self.setDriver('ST',0)
-            elif force:
+            else:
                 self.setDriver('ST',0)
         except Exception as ex:
             LOGGER.error('Error updating current schedule running status on %s Rachio Zone. %s', self.name, str(ex))
 
         # GV0 -> "Enabled"
         try:
-            if force or (_zone['enabled'] != self.zone['enabled']):
-                self.setDriver('GV0',int(_zone['enabled']))
+            self.setDriver('GV0',int(self.zone['enabled']))
         except Exception as ex:
             self.setDriver('GV0',0)
             LOGGER.error('Error updating enable status on %s Rachio Zone. %s', self.name, str(ex))
 
         # GV1 -> "Zone Number"
         try:
-            if force or (_zone['zoneNumber'] != self.zone['zoneNumber']):
-                self.setDriver('GV1', _zone['zoneNumber'])
+            self.setDriver('GV1', self.zone['zoneNumber'])
         except Exception as ex:
             LOGGER.error('Error updating zone number on %s Rachio Zone. %s', self.name, str(ex))
 
         # GV2 -> Available Water
         # TODO: Not 100% sure what this is or if the units are correct, need to see if Rachio has any additional info
         try:
-            if force or (_zone['availableWater'] != self.zone['availableWater']):
-                self.setDriver('GV2', _zone['availableWater'])
+            self.setDriver('GV2', self.zone['availableWater'])
         except Exception as ex:
             LOGGER.error('Error updating available water on %s Rachio Zone. %s', self.name, str(ex))
 
         # GV3 -> root zone depth
         # TODO: Not 100% sure what this is or if the units are correct, need to see if Rachio has any additional info
         try:
-            if force or (_zone['rootZoneDepth'] != self.zone['rootZoneDepth']):
-                self.setDriver('GV3', _zone['rootZoneDepth'])
+            self.setDriver('GV3', self.zone['rootZoneDepth'])
         except Exception as ex:
             LOGGER.error('Error updating root zone depth on %s Rachio Zone. %s', self.name, str(ex))
 
 		# GV4 -> allowed depletion
         # TODO: Not 100% sure what this is or if the units are correct, need to see if Rachio has any additional info
         try:
-            if force or (_zone['managementAllowedDepletion'] != self.zone['managementAllowedDepletion']):
-                self.setDriver('GV4', _zone['managementAllowedDepletion'])
+            self.setDriver('GV4', self.zone['managementAllowedDepletion'])
         except Exception as ex:
             LOGGER.error('Error updating allowed depletion on %s Rachio Zone. %s', self.name, str(ex))
 
 		# GV5 -> efficiency
         try:
-            if force or (_zone['efficiency'] != self.zone['efficiency']):
-                self.setDriver('GV5', int(_zone['efficiency'] * 100.))
+            self.setDriver('GV5', int(self.zone['efficiency'] * 100.))
         except Exception as ex:
             LOGGER.error('Error updating efficiency on %s Rachio Zone. %s', self.name, str(ex))
 
 		# GV6 -> square feet
         # TODO: This is in square feet, but there's no unit available in the ISY for square feet.  Update if UDI makes it available
         try:
-            if force or (_zone['yardAreaSquareFeet'] != self.zone['yardAreaSquareFeet']):
-                self.setDriver('GV6', _zone['yardAreaSquareFeet'])
+            self.setDriver('GV6', self.zone['yardAreaSquareFeet'])
         except Exception as ex:
             LOGGER.error('Error updating square footage on %s Rachio Zone. %s', self.name, str(ex))
 
 		# GV7 -> irrigation amount
         # TODO: Not 100% sure what this is or if the units are correct, need to see if Rachio has any additional info
         try:
-            if 'irrigationAmount' in _zone and 'irrigationAmount' in self.zone['irrigationAmount']:
-                if force or (_zone['irrigationAmount'] != self.zone['irrigationAmount']):
-                    self.setDriver('GV7', _zone['irrigationAmount'])
+            if 'irrigationAmount' in self.zone:
+                self.setDriver('GV7', self.zone['irrigationAmount'])
             else:
-                if force: self.setDriver('GV7', 0)
+                self.setDriver('GV7', 0)
         except Exception as ex:
             LOGGER.error('Error updating irrigation amount on %s Rachio Zone. %s', self.name, str(ex))
 
 		# GV8 -> depth of water
         # TODO: Not 100% sure what this is or if the units are correct, need to see if Rachio has any additional info
         try:
-            if force or (_zone['depthOfWater'] != self.zone['depthOfWater']):
-                self.setDriver('GV8', _zone['depthOfWater'])
+            self.setDriver('GV8', self.zone['depthOfWater'])
         except Exception as ex:
             LOGGER.error('Error updating depth of water on %s Rachio Zone. %s', self.name, str(ex))
 
 		# GV9 -> runtime
         # TODO: Not 100% sure what this is or if the units are correct, need to see if Rachio has any additional info
         try:
-            if force or (_zone['runtime'] != self.zone['runtime']):
-                self.setDriver('GV9', _zone['runtime'])
+            self.setDriver('GV9', self.zone['runtime'])
         except Exception as ex:
             LOGGER.error('Error updating runtime on %s Rachio Zone. %s', self.name, str(ex))
 
 		# GV10 -> inches per hour
         try:
-            if force or (_zone['customNozzle']['inchesPerHour'] != self.zone['customNozzle']['inchesPerHour']):
-                self.setDriver('GV10', _zone['customNozzle']['inchesPerHour'])
+            self.setDriver('GV10', self.zone['customNozzle']['inchesPerHour'])
         except Exception as ex:
             LOGGER.error('Error updating inches per hour on %s Rachio Zone. %s', self.name, str(ex))
         
-        self.zone = _zone
-        self.currentSchedule = _currentSchedule
-        #if force: self.reportDrivers() Removed v2.2.0
+        if force: self.reportDrivers()
         return True
 
     def query(self, command = None):
@@ -688,7 +631,7 @@ class RachioZone(polyinterface.Node):
                     _seconds = int(_minutes * 60.)
                     self.parent.r_api.zone.start(self.zone_id, _seconds)
                     LOGGER.info('Command received to start watering zone %s for %i minutes',self.name, _minutes)
-                    self.update_info(force=False) #update info but don't force updates to ISY if values haven't changed.
+                    self.update_info()
                     self._tries = 0
                     return True
                 except Exception as ex:
@@ -732,71 +675,58 @@ class RachioSchedule(polyinterface.Node):
         # No discovery needed (no nodes are subordinate to Schedules)
         pass
         
-    def update_info(self, force=False): #setting "force" to "true" updates drivers even if the value hasn't changed
+    def update_info(self, force=False):
         _running = False #initialize variable so that it could be used even if there was not a need to update the running status of the schedule
         try:
             #Get latest schedule info and populate drivers
-            _schedule = self.parent.r_api.schedulerule.get(self.schedule_id)[1]
-            if force: self.schedule = _schedule
-            _currentSchedule = self.parent.r_api.device.getCurrentSchedule(self.device_id)[1]
-            if self.currentSchedule == []: self.currentSchedule = _currentSchedule
+            self.schedule = self.parent.r_api.schedulerule.get(self.schedule_id)[1]
+            self.currentSchedule = self.parent.r_api.device.getCurrentSchedule(self.device_id)[1]
         except Exception as ex:
             LOGGER.error('Connection Error on %s Rachio schedule. This could mean an issue with internet connectivity or Rachio servers, normally safe to ignore. %s', self.name, str(ex))
             return False
             
         # ST -> Status (whether Rachio schedule is running a schedule or not)
         try:
-            if 'scheduleRuleId' in _currentSchedule and 'scheduleRuleId' in self.currentSchedule:
-                if force or (_currentSchedule['scheduleRuleId'] != self.currentSchedule['scheduleRuleId']):
-                    _running = (_currentSchedule['scheduleRuleId'] == self.schedule_id)
-                    self.setDriver('ST',(0,100)[_running])
-            elif 'scheduleRuleId' in _currentSchedule: #There was no schedule last time we checked but there is now, update ISY:
-                _running = (str(_currentSchedule['scheduleRuleId']) == self.schedule_id)
+            if 'scheduleRuleId' in self.currentSchedule:
+                _running = (self.currentSchedule['scheduleRuleId'] == self.schedule_id)
                 self.setDriver('ST',(0,100)[_running])
-            elif 'scheduleRuleId' in self.currentSchedule: #there was a schedule last time but there isn't now, update ISY:
-                self.setDriver('ST',0)
-            elif force:
+            else:
                 self.setDriver('ST',0)
         except Exception as ex:
             LOGGER.error('Error updating current schedule running status on %s Rachio Schedule. %s', self.name, str(ex))
 
         # GV0 -> "Enabled"
         try:
-            if force or (_schedule['enabled'] != self.schedule['enabled']):
-                self.setDriver('GV0',int(_schedule['enabled']))
+            self.setDriver('GV0',int(self.schedule['enabled']))
         except Exception as ex:
             LOGGER.error('Error updating enable status on %s Rachio Schedule. %s', self.name, str(ex))
 
         # GV1 -> "rainDelay" status
         try:
-            if force or (_schedule['rainDelay'] != self.schedule['rainDelay']):
-                self.setDriver('GV1',int(_schedule['rainDelay']))
+            self.setDriver('GV1',int(self.schedule['rainDelay']))
         except Exception as ex:
             LOGGER.error('Error updating schedule rain delay on %s Rachio Schedule. %s', self.name, str(ex))
 
         # GV2 -> duration (minutes)
         try:
-            if force or (_schedule['totalDuration'] != self.schedule['totalDuration']):
-                self.setDriver('GV2', _schedule['totalDuration'])
+            self.setDriver('GV2', self.schedule['totalDuration'])
         except Exception as ex:
             LOGGER.error('Error updating total duration on %s Rachio Schedule. %s', self.name, str(ex))
 
         # GV3 -> seasonal adjustment
         try:
-            if force or (_schedule['seasonalAdjustment'] != self.schedule['seasonalAdjustment']):
-                _seasonalAdjustment = _schedule['seasonalAdjustment'] * 100
-                self.setDriver('GV3', _seasonalAdjustment)
+            _seasonalAdjustment = self.schedule['seasonalAdjustment'] * 100
+            self.setDriver('GV3', _seasonalAdjustment)
         except Exception as ex:
             LOGGER.error('Error updating seasonal adjustment on %s Rachio Schedule. %s', self.name, str(ex))
 
         # GV4 -> Minutes until next automatic schedule start
         try:
-            _scheduleItems = self.parent.r_api.device.getScheduleItem(self.device_id)[1]
-            if force or self.scheduleItems == []: self.scheduleItems = _scheduleItems
-            if len(_scheduleItems) > 0:
+            self.scheduleItems = self.parent.r_api.device.getScheduleItem(self.device_id)[1]
+            if len(self.scheduleItems) > 0:
                 _current_time = int(time.time())
                 _next_start_time = 0
-                for _item in _scheduleItems: #find the lowest planned start time for this schedule:
+                for _item in self.scheduleItems: #find the lowest planned start time for this schedule:
                     if _item['scheduleRuleId'] == self.schedule_id:
                         if _next_start_time == 0 or _item['absoluteStartDate'] < _next_start_time:
                             _next_start_time = _item['absoluteStartDate']
@@ -806,14 +736,12 @@ class RachioSchedule(polyinterface.Node):
                 _minutes_remaining = round(_seconds_remaining / 60. ,1)
                 self.setDriver('GV4',_minutes_remaining)
 
-            elif force: 
+            else: 
                 self.setDriver('GV4',0.0)
         except Exception as ex:
             LOGGER.error('Error trying to retrieve minutes remaining until next run of %s Rachio Schedule. %s', self.name, str(ex))
 
-        self.schedule = _schedule
-        self.currentSchedule = _currentSchedule
-        #if force: self.reportDrivers() Removed v2.2.0
+        if force: self.reportDrivers()
         return True
         
     def query(self, command = None):
@@ -827,7 +755,7 @@ class RachioSchedule(polyinterface.Node):
             try:
                 self.parent.r_api.schedulerule.start(self.schedule_id)
                 LOGGER.info('Command received to start watering schedule %s',self.name)
-                self.update_info(force=False) #update info but don't force updates to ISY if values haven't changed.
+                self.update_info()
                 self._tries = 0
                 return True
             except Exception as ex:
@@ -841,7 +769,7 @@ class RachioSchedule(polyinterface.Node):
             try:
                 self.parent.r_api.schedulerule.skip(self.schedule_id)
                 LOGGER.info('Command received to skip watering schedule %s',self.name)
-                self.update_info(force=False) #update info but don't force updates to ISY if values haven't changed.
+                self.update_info()
                 self._tries = 0
                 return True
             except Exception as ex:
@@ -858,7 +786,7 @@ class RachioSchedule(polyinterface.Node):
                     _value = _value / 100.
                     self.parent.r_api.schedulerule.seasonalAdjustment(self.schedule_id, _value)
                     LOGGER.info('Command received to change seasonal adjustment on schedule %s to %s',self.name, str(_value))
-                    self.update_info(force=False) #update info but don't force updates to ISY if values haven't changed.
+                    self.update_info()
                     self._tries = 0
                     return True
                 else:
@@ -898,63 +826,47 @@ class RachioFlexSchedule(polyinterface.Node):
         # No discovery needed (no nodes are subordinate to Flex Schedules)
         pass
 
-    def update_info(self, force=False): #setting "force" to "true" updates drivers even if the value hasn't changed
+    def update_info(self, force=False):
         _running = False #initialize variable so that it could be used even if there was not a need to update the running status of the schedule
         try:
             #Get latest schedule info and populate drivers
-            _schedule = self.parent.r_api.flexschedulerule.get(self.schedule_id)[1]
-            if force: self.schedule = _schedule
-            _currentSchedule = self.parent.r_api.device.getCurrentSchedule(self.device_id)[1]
-            if self.currentSchedule == []: self.currentSchedule = _currentSchedule
+            self.schedule = self.parent.r_api.flexschedulerule.get(self.schedule_id)[1]
+            self.currentSchedule = self.parent.r_api.device.getCurrentSchedule(self.device_id)[1]
         except Exception as ex:
             LOGGER.error('Connection Error on %s Rachio schedule. This could mean an issue with internet connectivity or Rachio servers, normally safe to ignore. %s', self.name, str(ex))
             return False
             
         # ST -> Status (whether Rachio schedule is running a schedule or not)
         try:
-            if 'scheduleRuleId' in _currentSchedule and 'scheduleRuleId' in self.currentSchedule:
-                if force or (_currentSchedule['scheduleRuleId'] != self.currentSchedule['scheduleRuleId']):
-                    _running = (_currentSchedule['scheduleRuleId'] == self.schedule_id)
-                    self.setDriver('ST',(0,100)[_running])
-            elif 'scheduleRuleId' in _currentSchedule: #There was no schedule last time we checked but there is now, update ISY:
-                _running = (str(_currentSchedule['scheduleRuleId']) == self.schedule_id)
+            if 'scheduleRuleId' in self.currentSchedule:
+                _running = (self.currentSchedule['scheduleRuleId'] == self.schedule_id)
                 self.setDriver('ST',(0,100)[_running])
-            elif 'scheduleRuleId' in self.currentSchedule: #there was a schedule last time but there isn't now, update ISY:
-                self.setDriver('ST',0)
-            elif force:
+            else:
                 self.setDriver('ST',0)
         except Exception as ex:
             LOGGER.error('Error updating current schedule running status on %s Rachio FlexSchedule. %s', self.name, str(ex))
 
         # GV0 -> "Enabled"
         try:
-            if force or (_schedule['enabled'] != self.schedule['enabled']):
-                self.setDriver('GV0',int(_schedule['enabled']))
+            self.setDriver('GV0',int(self.schedule['enabled']))
         except Exception as ex:
             LOGGER.error('Error updating enable status on %s Rachio FlexSchedule. %s', self.name, str(ex))
 
         # GV2 -> duration (minutes)
         try:
-            if force or (_schedule['totalDuration'] != self.schedule['totalDuration']):
-                _seconds = _schedule['totalDuration']
-                _minutes = int(_seconds / 60.)
-                self.setDriver('GV2', _minutes)
+            _seconds = self.schedule['totalDuration']
+            _minutes = int(_seconds / 60.)
+            self.setDriver('GV2', _minutes)
         except Exception as ex:
             LOGGER.error('Error updating total duration on %s Rachio FlexSchedule. %s', self.name, str(ex))
 
-        self.schedule = _schedule
-        self.currentSchedule = _currentSchedule
-        #self.reportDrivers() Removed v2.2.0
-        return True
-
         # GV4 -> Minutes until next automatic schedule start
         try:
-            _scheduleItems = self.parent.r_api.device.getScheduleItem(self.device_id)[1]
-            if force or self.scheduleItems == []: self.scheduleItems = _scheduleItems
-            if len(_scheduleItems) > 0:
+            self.scheduleItems = self.parent.r_api.device.getScheduleItem(self.device_id)[1]
+            if len(self.scheduleItems) > 0:
                 _current_time = int(time.time())
                 _next_start_time = 0
-                for _item in _scheduleItems: #find the lowest planned start time for this schedule:
+                for _item in self.scheduleItems: #find the lowest planned start time for this schedule:
                     if _item['scheduleRuleId'] == self.schedule_id:
                         if _next_start_time == 0 or _item['absoluteStartDate'] < _next_start_time:
                             _next_start_time = _item['absoluteStartDate']
@@ -964,12 +876,12 @@ class RachioFlexSchedule(polyinterface.Node):
                 _minutes_remaining = round(_seconds_remaining / 60. ,1)
                 self.setDriver('GV4',_minutes_remaining)
 
-            elif force: 
+            else: 
                 self.setDriver('GV4',0.0)
         except Exception as ex:
             LOGGER.error('Error trying to retrieve minutes remaining until next run of %s Rachio FlexSchedule. %s', self.name, str(ex))
         
-        #if force: self.reportDrivers() Removed v2.2.0
+        if force: self.reportDrivers()
 
     def query(self, command = None):
         LOGGER.info('query command received on %s Rachio Flex Schedule', self.name)
@@ -978,7 +890,8 @@ class RachioFlexSchedule(polyinterface.Node):
 
     drivers = [{'driver': 'ST', 'value': 0, 'uom': 78}, #Running (On/Off)
                {'driver': 'GV0', 'value': 0, 'uom': 2}, #Enabled (True/False)
-               {'driver': 'GV2', 'value': 0, 'uom': 45} #Duration (Minutes)
+               {'driver': 'GV2', 'value': 0, 'uom': 45}, #Duration (Minutes)
+               {'driver': 'GV4', 'value': 0, 'uom': 45} #Time until next Schedule Start (Minutes)
                ]
 
     id = 'rachio_flexschedule'

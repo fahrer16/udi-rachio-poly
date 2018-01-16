@@ -9,6 +9,7 @@
       <sends />
       <accepts>
         <cmd id="DISCOVER" />
+        <cmd id="QUERY" />
       </accepts>
     </cmds>
   </nodeDef>

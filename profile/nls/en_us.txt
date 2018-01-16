@@ -3,6 +3,7 @@ ND-rachio-NAME = Rachio Bridge
 ND-rachio-ICON = Irrigation
 ST-rapi-ST-NAME = Node Server Connected
 CMD-rapi-DISCOVER-NAME = Discover
+CMD-rapi-QUERY-NAME = Query All Devices
 
 # RachioController
 ND-rachio_device-NAME = Rachio Device
