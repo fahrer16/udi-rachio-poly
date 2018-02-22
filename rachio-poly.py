@@ -630,7 +630,7 @@ class RachioZone(polyinterface.Node):
                         return False
                     _seconds = int(float(_minutes) * 60.)
                     self.parent.r_api.zone.start(self.zone_id, _seconds)
-                    LOGGER.info('Command received to start watering zone %s for %i minutes',self.name, _minutes)
+                    LOGGER.info('Command received to start watering zone %s for %s minutes',self.name, str(_minutes))
                     self.update_info()
                     self._tries = 0
                     return True
