@@ -267,7 +267,7 @@ class RachioController(polyinterface.Node):
         # ST -> Status (whether Rachio is running a schedule or not)
         try:
             if 'status' in self.currentSchedule:
-                _running = (str(_currentSchedule['status']) == "PROCESSING")
+                _running = (str(self.currentSchedule['status']) == "PROCESSING")
                 self.setDriver('ST',(0,100)[_running])
             else:
                 self.setDriver('ST',0)
@@ -357,7 +357,7 @@ class RachioController(polyinterface.Node):
         # GV7 -> Cycling (true/false)
         try:
             if 'cycling' in self.currentSchedule:
-                self.setDriver('GV7',int(_currentSchedule['cycling']))
+                self.setDriver('GV7',int(self.currentSchedule['cycling']))
             else: self.setDriver('GV7', 0) #no schedule active
         except Exception as ex:
             LOGGER.error('Error trying to retrieve cycling status on %s Rachio Controller. %s', self.name, str(ex))
@@ -365,7 +365,7 @@ class RachioController(polyinterface.Node):
         # GV8 -> Cycle Count
         try:
             if 'cycleCount' in self.currentSchedule:
-                self.setDriver('GV8',_currentSchedule['cycleCount'])
+                self.setDriver('GV8',self.currentSchedule['cycleCount'])
             else: self.setDriver('GV8',0) #no schedule active
         except Exception as ex:
             LOGGER.error('Error trying to retrieve cycle count on %s Rachio Controller. %s', self.name, str(ex))
@@ -373,7 +373,7 @@ class RachioController(polyinterface.Node):
         # GV9 -> Total Cycle Count
         try:
             if 'totalCycleCount' in self.currentSchedule:
-                self.setDriver('GV9',_currentSchedule['totalCycleCount'])
+                self.setDriver('GV9',self.currentSchedule['totalCycleCount'])
             else: self.setDriver('GV9',0) #no schedule active
         except Exception as ex:
             LOGGER.error('Error trying to retrieve total cycle count on %s Rachio Controller. %s', self.name, str(ex))
@@ -458,17 +458,17 @@ class RachioController(polyinterface.Node):
             LOGGER.error('Rain Delay requested on %s Rachio Controller but no duration specified', self.name)
             return False
         else:
+            LOGGER.info('Received rain Delay command on %s Rachio Controller for %s minutes', self.name, str(_minutes))
             self._tries = 0
             while self._tries < 2: #TODO: the first command to the Rachio server fails frequently for some reason with an SSL WRONG_VERSION_NUMBER error.  This is a temporary workaround to try a couple of times before giving up
                 try:
-                    _seconds = int(_minutes * 60.)
+                    _seconds = int(float(_minutes) * 60.)
                     self.parent.r_api.device.rainDelay(self.device_id, _seconds)
                     self.update_info()
-                    LOGGER.info('Received rain Delay command on %s Rachio Controller for %s minutes', self.name, str(_minutes))
                     self._tries = 0
                     return True
                 except Exception as ex:
-                    LOGGER.error('Error setting rain delay on %s Rachio Controller to _seconds %i (%s)', self.name, _seconds, str(ex))
+                    LOGGER.error('Error setting rain delay on %s Rachio Controller (%s)', self.name, str(ex))
                     self._tries = self._tries +1
             return False
 
@@ -628,7 +628,7 @@ class RachioZone(polyinterface.Node):
                     if _minutes == 0:
                         LOGGER.error('Zone %s requested to start but duration specified was zero', self.name)
                         return False
-                    _seconds = int(_minutes * 60.)
+                    _seconds = int(float(_minutes) * 60.)
                     self.parent.r_api.zone.start(self.zone_id, _seconds)
                     LOGGER.info('Command received to start watering zone %s for %i minutes',self.name, _minutes)
                     self.update_info()
