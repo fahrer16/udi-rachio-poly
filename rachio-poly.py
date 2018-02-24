@@ -709,13 +709,15 @@ class RachioSchedule(polyinterface.Node):
 
         # GV2 -> duration (minutes)
         try:
-            self.setDriver('GV2', self.schedule['totalDuration'])
+            _seconds = float(self.schedule['totalDuration'])
+            _minutes = int(_seconds / 60.)
+            self.setDriver('GV2', _minutes)
         except Exception as ex:
             LOGGER.error('Error updating total duration on %s Rachio Schedule. %s', self.name, str(ex))
 
         # GV3 -> seasonal adjustment
         try:
-            _seasonalAdjustment = self.schedule['seasonalAdjustment'] * 100
+            _seasonalAdjustment = float(self.schedule['seasonalAdjustment']) * 100.
             self.setDriver('GV3', _seasonalAdjustment)
         except Exception as ex:
             LOGGER.error('Error updating seasonal adjustment on %s Rachio Schedule. %s', self.name, str(ex))
@@ -781,7 +783,7 @@ class RachioSchedule(polyinterface.Node):
         self._tries = 0
         while self._tries < 2: #TODO: the first command to the Rachio server fails frequently for some reason with an SSL WRONG_VERSION_NUMBER error.  This is a temporary workaround to try a couple of times before giving up
             try:
-                _value = command.get('value')
+                _value = float(command.get('value'))
                 if _value is not None:
                     _value = _value / 100.
                     self.parent.r_api.schedulerule.seasonalAdjustment(self.schedule_id, _value)
@@ -854,7 +856,7 @@ class RachioFlexSchedule(polyinterface.Node):
 
         # GV2 -> duration (minutes)
         try:
-            _seconds = self.schedule['totalDuration']
+            _seconds = float(self.schedule['totalDuration'])
             _minutes = int(_seconds / 60.)
             self.setDriver('GV2', _minutes)
         except Exception as ex:

@@ -32,6 +32,7 @@ Any Rachio units associated with the specified API key should now show up in the
 * 2.3.0: Simplified driver update logic
 * 2.3.1: Corrected bugs relating to setting Rain Delay and Starting Zone
 * 2.3.2: Bug fix for zone start log message
+* 2.3.3: Bug fixes for schedule durations and season adjustment commands
 
 ## Known Issues:
 1. Icons for Rachio Nodes should show up as Irrigation but show up as Bulb.  Appears to be an issue with ISY994i not accepting Irrigation icon type from NLS definition.
