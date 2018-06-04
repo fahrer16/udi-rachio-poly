@@ -21,8 +21,6 @@ ST-rdev-GV6-NAME = Active Schedule Elapsed
 ST-rdev-GV7-NAME = Cycling
 ST-rdev-GV8-NAME = Cycle Count
 ST-rdev-GV9-NAME = Total Cycle Count
-ST-rdev-GV11-NAME = Time Until Next Schedule
-ST-rdev-GV12-NAME = Next Schedule Type
 CMD-rdev-DON-NAME = Enable
 CMD-rdev-DOF-NAME = Disable
 CMD-rdev-STOP-NAME = Stop
@@ -57,7 +55,6 @@ ST-rsched-GV0-NAME = Enabled
 ST-rsched-GV1-NAME = Rain Delay
 ST-rsched-GV2-NAME = Duration
 ST-rsched-GV3-NAME = Seasonal Adjustment
-ST-rsched-GV4-NAME = Time Until Next Run
 CMD-rsched-START-NAME = Start
 CMD-rsched-SKIP-NAME = Skip
 CMD-rsched-ADJUST-NAME = Seasonal Adjustment
@@ -70,7 +67,6 @@ ST-rflex-NAME = Rachio Flex Schedule
 ST-rflex-ST-NAME = Running
 ST-rflex-GV0-NAME = Enabled
 ST-rflex-GV2-NAME = Duration
-ST-rflex-GV4-NAME = Time Until Next Run
 CMD-rflex-QUERY-NAME = Query
 
 #Run Types:
@@ -78,10 +74,3 @@ RUN_TYPES-0 = None
 RUN_TYPES-1 = Automatic
 RUN_TYPES-2 = Manual
 RUN_TYPES-3 = Other
-
-#Schedule Types:
-SCHED_TYPES-0 = None
-SCHED_TYPES-1 = Fixed
-SCHED_TYPES-2 = Flex
-SCHED_TYPES-3 = Other
-

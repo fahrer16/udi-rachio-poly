@@ -17,11 +17,16 @@ This node server currently implements the Person, Device, and Zone leaves of the
   * 'install.sh
 4. Add Node Server into Polyglot instance.
   * Follow instructions here, starting with "Open Polyglot": https://github.com/Einstein42/udi-polyglotv2/wiki/Creating-a-NodeServer 
+5. Select port to use for Rachio websocket traffic to internal Polyglot server (defaults to 3001).  
+  * Forward selected port to internal polyglot server.  
+  * Add host and port keys to polyglot configuration (See custom configuration parameters below).  Note: Use of a Dynamic DNS service for the external host is recommended.
 
 Any Rachio units associated with the specified API key should now show up in the ISY, hit "Query" if the status fields are empty.  
 
 ## Polyglot Custom Configuration Parameters
 * REQUIRED: Key:'api_key' Value: See "https://rachio.readme.io/v1.0/docs" for instructions on how to obtain Rachio API Key.
+* REQUIRED: Key: 'host' Value: External address for polyglot server (External static IP or Dynamic DNS host name).
+* OPTIONAL: Key: 'port' Value: External port (integer) for polyglot server.  Note: This port must be opened through firewall and forwarded to the internal polyglot server.  Defaults to '3001' if no entry given but opening port is not optional (required for Rachio websockets).
 * OPTIONAL: Key:'nodeAdditionInterval' Value: On discovery, nodes will be added at this interval (in seconds).
  
 ## Version History:
@@ -33,6 +38,7 @@ Any Rachio units associated with the specified API key should now show up in the
 * 2.3.1: Corrected bugs relating to setting Rain Delay and Starting Zone
 * 2.3.2: Bug fix for zone start log message
 * 2.3.3: Bug fixes for schedule durations and season adjustment commands
+* 2.4.0: Updated to accommodate changes in Rachio Cloud API.  Added websocket support and caching to minimize API calls.  Removed drivers for "time until next schedule run" because required info was removed from Rachio API.
 
 ## Known Issues:
 1. Icons for Rachio Nodes should show up as Irrigation but show up as Bulb.  Appears to be an issue with ISY994i not accepting Irrigation icon type from NLS definition.

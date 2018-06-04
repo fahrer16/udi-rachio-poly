@@ -30,8 +30,6 @@
       <st id="GV7" editor="truefalse" />
       <st id="GV8" editor="cycle" />
       <st id="GV9" editor="cycle" />
-      <st id="GV11" editor="minuteslng" />
-      <st id="GV12" editor="schedtypes" />
     </sts>
     <cmds>
       <sends />
@@ -82,7 +80,6 @@
       <st id="GV1" editor="truefalse" />
       <st id="GV2" editor="minutes" />
       <st id="GV3" editor="seasonal" />
-      <st id="GV4" editor="minuteslng" />
     </sts>
     <cmds>
       <sends />
@@ -103,7 +100,6 @@
       <st id="ST" editor="onoff" />
       <st id="GV0" editor="truefalse" />
       <st id="GV2" editor="minutes" />
-      <st id="GV4" editor="minuteslng" />
     </sts>
     <cmds>
       <sends />

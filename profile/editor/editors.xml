@@ -18,9 +18,6 @@
   <editor id="minutes">
     <range uom="45" min="0" max="255" prec="1" step="1" />
   </editor>
-  <editor id="minuteslng">
-    <range uom="45" min="0" max="20160" prec="1" step="720" />
-  </editor>
 
   <!-- Rachio Rain Delay editor -->
   <editor id="raindelay">
@@ -63,11 +60,6 @@
   <!-- Rachio Run Types (Manual vs. Automatic) -->
   <editor id="runtypes">
     <range uom="25" subset="0-3" nls="RUN_TYPES" />
-  </editor>
-
-  <!-- Rachio Schedule Types (Fixed vs. Flex) -->
-  <editor id="schedtypes">
-    <range uom="25" subset="0-3" nls="SCHED_TYPES" />
   </editor>
 
 </editors>

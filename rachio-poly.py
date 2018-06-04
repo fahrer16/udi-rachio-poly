@@ -9,12 +9,29 @@ import sys
 from socket import error as socket_error
 from copy import deepcopy
 import json, time
+from datetime import datetime
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import httplib2
+import re
 from threading import Timer #Added version 2.2.0 for node addition queue
+import threading
 from rachiopy import Rachio
  
 LOGGER = polyinterface.LOGGER
 SERVERDATA = json.load(open('server.json'))
 VERSION = SERVERDATA['credits'][0]['version']
+_HTTP = httplib2.Http()
+WS_EVENT_TYPES = {
+        "DEVICE_STATUS_EVENT": 5,
+        "RAIN_DELAY_EVENT": 6,
+        "WEATHER_INTELLIGENCE_EVENT": 7,
+        "WATER_BUDGET": 8,
+        "SCHEDULE_STATUS_EVENT": 9,
+        "ZONE_STATUS_EVENT": 10,
+        "RAIN_SENSOR_DETECTION_EVENT": 11,
+        "ZONE_DELTA": 12,
+        "DELTA": 14
+    }
 
 class Controller(polyinterface.Controller):
     """
@@ -49,6 +66,9 @@ class Controller(polyinterface.Controller):
         _msg = "Connection timer created for node addition queue"
         self.timer = Timer(1,LOGGER.debug,[_msg])
         self.nodeAdditionInterval = 1
+        self.httpPort = 3001
+        self.httpHost = ''
+        self.device_id = ''
 
     def start(self):
         LOGGER.info('Starting Rachio Polyglot v2 NodeServer version {}'.format(VERSION))
@@ -57,37 +77,171 @@ class Controller(polyinterface.Controller):
                 self.api_key = self.polyConfig['customParams']['api_key']
             else:
                 LOGGER.error('Rachio API key required in order to establish connection.  Enter custom parameter of \'api_key\' in Polyglot configuration.  See "https://rachio.readme.io/v1.0/docs" for instructions on how to obtain Rachio API Key.')
+                sys.exit(0)
                 return False
+        
         except Exception as ex:
             LOGGER.error('Error reading Rachio API Key from Polyglot Configuration: %s', str(ex))
             return False
-
-        #Get Node Addition Interval from Polyglot Configuration (Added version 2.2.0)
+            
+        ###Start HTTP Server for Websockets####
         try:
-            if 'nodeAdditionInterval' in self.polyConfig['customParams']:
-                _nodeAdditionInterval = self.polyConfig['customParams']['nodeAdditionInterval']
-                if _nodeAdditionInterval >= 0 and _nodeAdditionInterval <= 60:
-                    self.nodeAdditionInterval = _nodeAdditionInterval
-                else:
-                    LOGGER.error('Node Addition Interval configured but outside of permissible range of 0 - 60 seconds, defaulting to %s second(s)', str(self.nodeAdditionInterval))
+            if 'port' in self.polyConfig['customParams']:
+                self.httpPort = self.polyConfig['customParams']['port']
             else:
-                LOGGER.info('Node Addition Interval not configured, defaulting to %s second(s).  If a different time is needed, enter a custom parameter with a key of \'nodeAdditionInterval\' and a value in seconds in order to change interval.', str(self.nodeAdditionInterval))
+                LOGGER.error('No HTTP Port specified in Rachio configuration for Websocket endpoint.  Using port %s for now.  Enter custom parameter of \'port\' in Polyglot configuration.', str(self.httpPort))
+            LOGGER.info('Ensure router/firewall is set to forward requests to polyglot host on port %s',str(self.httpPort))
         except Exception as ex:
-            LOGGER.error('Error reading Rachio Node Addition Interval from Polyglot Configuration: %s', str(ex))
+            LOGGER.error('Error reading webSocket Port from Polyglot Configuration: %s', str(ex))
+            sys.exit(0)
+            return False
+            
+        try:
+            if 'host' in self.polyConfig['customParams']:
+                self.httpHost = self.polyConfig['customParams']['host']
+            else:
+                LOGGER.error('No HTTP Host specified in Rachio configuration for websocket endpoint.  Enter custom parameter of \'host\' in Polyglot configuration.')
+                sys.exit(0)
+        except Exception as ex:
+            LOGGER.error('Error reading webSocket host name from Polyglot Configuration: %s', str(ex))
+            sys.exit(0)
+            return False
+        
+        try:
+            LOGGER.debug('Starting Websocket HTTP Server')
+            self.webSocketServer = HTTPServer(('', int(self.httpPort)), webSocketHandler)
+            self.webSocketServer.controller = self #To allow handler to access this class when receiving a request from Rachio servers
+            self.httpThread = threading.Thread(target=self.webSocketServer.serve_forever, daemon=True).start()
+        except Exception as ex:
+            LOGGER.error('Error starting webSocket server: %s', str(ex))
+            sys.exit(0)
+            return False
 
-        self.discover()
+        if self.testWebSocketConnectivity(self.httpHost, self.httpPort):
+            #Get Node Addition Interval from Polyglot Configuration (Added version 2.2.0)
+            try:
+                if 'nodeAdditionInterval' in self.polyConfig['customParams']:
+                    _nodeAdditionInterval = self.polyConfig['customParams']['nodeAdditionInterval']
+                    if _nodeAdditionInterval >= 0 and _nodeAdditionInterval <= 60:
+                        self.nodeAdditionInterval = _nodeAdditionInterval
+                    else:
+                        LOGGER.error('Node Addition Interval configured but outside of permissible range of 0 - 60 seconds, defaulting to %s second(s)', str(self.nodeAdditionInterval))
+                else:
+                    LOGGER.info('Node Addition Interval not configured, defaulting to %s second(s).  If a different time is needed, enter a custom parameter with a key of \'nodeAdditionInterval\' and a value in seconds in order to change interval.', str(self.nodeAdditionInterval))
+            except Exception as ex:
+                LOGGER.error('Error reading Rachio Node Addition Interval from Polyglot Configuration: %s', str(ex))
 
+            self.discover()
+        else:
+            LOGGER.error('Websocket connectivity test failed, exiting')
+            sys.exit(0)
+            
+        
+        LOGGER.debug('Rachio "start" routine complete')
+        
+    def testWebSocketConnectivity(self, host, port):
+        try:
+            _url = 'http://' + host + ':' + port + '/test'
+            LOGGER.info('Testing connectivity to %s:%s', str(host), str(port))
+            _headers = {'Content-Type': 'application/json'}
+            (_resp, _content) = _HTTP.request(_url, 'GET', headers=_headers)
+            content_type = _resp.get('content-type')
+            if content_type and content_type.startswith('application/json'):
+                _content = json.loads(_content.decode('UTF-8'))
+                if 'success' in _content:
+                    if _content['success'] == "True":
+                        LOGGER.info('Connectivity test to %s:%s succeeded', str(host), str(port))
+                        return True
+                    else:
+                        LOGGER.error('Connectivity test to %s:%s was not successful', str(host), str(port))
+                        return False
+                else:
+                    LOGGER.error('Connectivity test to %s:%s was not successful, unexpected content', str(host), str(port))
+                    return False
+            else:
+                LOGGER.error('Connectivity test to %s:%s was not successful, unexpected response', str(host), str(port))
+                return False
+        except Exception as ex:
+            LOGGER.error('Error reaching specified host:port externally (%s:%s).  Please ensure entries are correct and the appropriate firewall ports have been opened: %s', str(host), str(port), str(ex))
+            return False
+            
+    def configureWebSockets(self, WS_deviceID):
+        #Get the webSockets configured for the specified device.  Delete any older, inappropriate websockets and create new ones as needed
+        _url = 'http://' + self.httpHost + ':' + self.httpPort
+        
+        #Build event types array:
+        _eventTypes = []
+        for key, value in WS_EVENT_TYPES.items():
+            _eventTypes.append({'id':str(value)})
+        
+        try:
+            _ws = self.r_api.notification.getDeviceWebhook(WS_deviceID)
+            LOGGER.debug('Obtained webHook information for %s, %s/%s API requests remaining until %s', str(WS_deviceID), str(_ws[0]['x-ratelimit-remaining']), str(_ws[0]['x-ratelimit-limit']),str(_ws[0]['x-ratelimit-reset']))
+            _websocketFound = False
+            _wsId = ''
+            for _websocket in _ws[1]:
+                if 'externalId' in _websocket and 'url' in _websocket and 'id' in _websocket and 'eventTypes' in _websocket:
+                    if _websocket['externalId'] == 'polyglot' and not _websocketFound: #This is the first polyglot-created websocket
+                        if self.httpHost not in _websocket['url']:
+                            #Polyglot websocket but url does not match currently configured host and port
+                            LOGGER.info('Websocket %s found but url (%s) is not correct, updating', str(_websocket['id']), str(_websocket['url']))
+                            try:
+                                _updateWS = self.r_api.notification.putWebhook(_websocket['id'], 'polyglot', _url, _eventTypes)
+                                LOGGER.debug('Updated webhook %s, %s/%s API requests remaining until %s', str(_websocket['id']), str(_updateWS[0]['x-ratelimit-remaining']), str(_updateWS[0]['x-ratelimit-limit']),str(_updateWS[0]['x-ratelimit-reset']))
+                                _websocketFound = True
+                                _wsId = _websocket['id']
+                            except Exception as ex:
+                                LOGGER.error('Error updating websocket %s url to "%s": %s', str(_websocket['id']), str(_url), str(ex))
+                        else:
+                            #URL is OK, check that all websocket event types are included:
+                            _allEventsPresent = True
+                            for key, value in WS_EVENT_TYPES.items():
+                                _allEventsPresent = _allEventsPresent and any(key in d for d in _websocket['eventTypes'])
+                            
+                            if not _allEventsPresent:
+                                #at least one websocket event is missing from the definition on the Rachio servers, updated the websocket:
+                                LOGGER.info('Websocket %s found but websocket event is missing, updating', str(_websocket['id']))
+                                try:
+                                    _updateWS = self.r_api.notification.putWebhook(_websocket['id'], 'polyglot', _url, _eventTypes)
+                                    LOGGER.debug('Updated webhook %s, %s/%s API requests remaining until %s', str(_websocket['id']), str(_updateWS[0]['x-ratelimit-remaining']), str(_updateWS[0]['x-ratelimit-limit']),str(_updateWS[0]['x-ratelimit-reset']))
+                                    _websocketFound = True
+                                    _wsId = _websocket['id']
+                                except Exception as ex:
+                                    LOGGER.error('Error updating websocket %s events: %s', str(_websocket['id']), str(ex))
+                            else:
+                                #Websocket definition is OK!
+                                _websocketFound = True
+                                _wsId = _websocket['id']
+                                
+                    elif  _websocket['externalId'] == 'polyglot' and _websocketFound: #This is an additional polyglot-created websocket
+                        LOGGER.info('Polyglot websocket %s found but polyglot already has a websocket defined (%s).  Deleting this websocket', str(_websocket['id']), str(_wsId))
+                        _deleteWs = self.r_api.notification.deleteWebhook(_websocket['id'])
+                        LOGGER.debug('Deleted webhook %s, %s/%s API requests remaining until %s', str(_websocket['id']), str(_deleteWS[0]['x-ratelimit-remaining']), str(_deleteWS[0]['x-ratelimit-limit']),str(_deleteWS[0]['x-ratelimit-reset']))
+            
+            if not _websocketFound:
+                #No Polyglot websockets were found, create one:
+                LOGGER.info('No Polyglot websockets were found for device %s, creating a new websocket for Polyglot', str(WS_deviceID))
+                try:
+                    _createWS = self.r_api.notification.postWebhook(WS_deviceID, 'polyglot', _url, _eventTypes)
+                    _resp = str(_createWS[1])
+                    LOGGER.debug('Created webhook for device %s. "%s". %s/%s API requests remaining until %s', str(WS_deviceID), str(_resp), str(_createWS[0]['x-ratelimit-remaining']), str(_createWS[0]['x-ratelimit-limit']),str(_createWS[0]['x-ratelimit-reset']))
+                except Exception as ex:
+                    LOGGER.error('Error creating websocket for device %s: %s', str(WS_deviceID), str(ex))
+        except Exception as ex:
+            LOGGER.error('Error configuring websockets for device %s: %s', str(WS_deviceID), str(ex))
+
+    
     def shortPoll(self):
         pass
 
     def longPoll(self):
         try:
             for node in self.nodes:
-                self.nodes[node].update_info()
+                self.nodes[node].update_info(force=False,queryAPI=False)
         except Exception as ex:
             LOGGER.error('Error running longPoll on %s: %s', self.name, str(ex))
 
-    def update_info(self, force=False):
+    def update_info(self, force=False, queryAPI=True):
         #Nothing to update for this node
         pass
 
@@ -110,8 +264,12 @@ class Controller(polyinterface.Controller):
             _person_id = self.r_api.person.getInfo()
             self.person_id = _person_id[1]['id']
             self.person = self.r_api.person.get(self.person_id) #returns json containing all info associated with person (devices, zones, schedules, flex schedules, and notifications)
+            LOGGER.debug('Obtained Person ID (%s), %s/%s API requests remaining until %s', str(self.person_id), str(_person_id[0]['x-ratelimit-remaining']), str(_person_id[0]['x-ratelimit-limit']),str(_person_id[0]['x-ratelimit-reset']))
         except Exception as ex:
-            LOGGER.error('Connection Error on RachioControl discovery, may be temporary. %s', str(ex))
+            try:
+                LOGGER.error('Connection Error on RachioControl discovery, may be temporary. %s. %s/%s API requests remaining until %s', str(ex), str(_person_id[0]['x-ratelimit-remaining']), str(_person_id[0]['x-ratelimit-limit']),str(_person_id[0]['x-ratelimit-reset']))
+            except:
+                LOGGER.error('Connection Error on RachioControl discovery, may be temporary. %s.',str(ex))
             return False
 
         try:
@@ -120,12 +278,12 @@ class Controller(polyinterface.Controller):
             LOGGER.info('%i Rachio controllers found. Adding to ISY', len(_devices))
             for d in _devices:
                 _device_id = str(d['id'])
-
                 _name = str(d['name'])
                 _address = str(d['macAddress']).lower()
                 if _address not in self.nodes:
                     #LOGGER.info('Adding Rachio Controller: %s(%s)', _name, _address)
                     self.addNodeQueue(RachioController(self, _address, _address, _name, d))
+                self.configureWebSockets(_device_id)
 
         except Exception as ex:
             LOGGER.error('Error during Rachio device discovery: %s', str(ex))
@@ -162,7 +320,7 @@ class Controller(polyinterface.Controller):
                     del self.nodeQueue[_address]
                     break #only add one node at a time
         
-            if len(self.nodeQueue) > 0: #Check for more nodes after addition, if there are more to addd, restart the timer
+            if len(self.nodeQueue) > 0: #Check for more nodes after addition, if there are more to add, restart the timer
                 self._startNodeAdditionDelayTimer()
             else:
                 LOGGER.info('No nodes pending addition')
@@ -186,23 +344,23 @@ class RachioController(polyinterface.Node):
         self.parent = parent
         self.device = device
         self.device_id = device['id']
+        self.lastDeviceUpdateTime = datetime(1970,1,1)
+        
         self.rainDelay_minutes_remaining = 0
         self.currentSchedule = []
-        self.scheduleItems = []
+        self.lastSchedUpdateTime = datetime(1970,1,1)
+        
         self._tries = 0
         self.runTypes = {0: "NONE",
                               1: "AUTOMATIC",
                               2: "MANUAL",
                               3: "OTHER"}
-
-        self.scheduleTypes = {0: "NONE",
-                              1: "FIXED",
-                              2: "FLEX",
-                              3: "OTHER"}
+                              
+        self.discoverComplete = False
 
     def start(self):
-        self.update_info()
-        self.discover()
+        self.update_info(force=True,queryAPI=True)
+        self.discoverComplete = self.discover()
 
     def discover(self, command=None):
         _success = True
@@ -217,7 +375,7 @@ class RachioController(polyinterface.Node):
                 _zone_name = str(z['name'])
                 if _zone_addr not in self.parent.nodes:
                     #LOGGER.info('Adding new Rachio Zone to %s Controller, %s(%s)', self.name, _zone_name, _zone_addr)
-                    self.parent.addNodeQueue(RachioZone(self.parent, self.address, _zone_addr, _zone_name, z, self.device_id)) #v2.2.0, updated to add node to queue, rather that adding to ISY immediately
+                    self.parent.addNodeQueue(RachioZone(self.parent, self.address, _zone_addr, _zone_name, z, self.device_id, self)) #v2.2.0, updated to add node to queue, rather that adding to ISY immediately
         except Exception as ex:
             _success = False
             LOGGER.error('Error discovering and adding Zones on Rachio Controller %s (%s): %s', self.name, self.address, str(ex))
@@ -231,7 +389,7 @@ class RachioController(polyinterface.Node):
                 _sched_name = str(s['name'])
                 if _sched_addr not in self.parent.nodes:
                     #LOGGER.info('Adding new Rachio Schedule to %s Controller, %s(%s)', self.name, _sched_name, _sched_addr)
-                    self.parent.addNodeQueue(RachioSchedule(self.parent, self.address, _sched_addr, _sched_name, s, self.device_id)) #v2.2.0, updated to add node to queue, rather that adding to ISY immediately
+                    self.parent.addNodeQueue(RachioSchedule(self.parent, self.address, _sched_addr, _sched_name, s, self.device_id, self)) #v2.2.0, updated to add node to queue, rather that adding to ISY immediately
         except Exception as ex:
             _success = False
             LOGGER.error('Error discovering and adding Schedules on Rachio Controller %s (%s): %s', self.name, self.address, str(ex))
@@ -245,24 +403,48 @@ class RachioController(polyinterface.Node):
                 _flex_sched_name = str(f['name'])
                 if _flex_sched_addr not in self.parent.nodes:
                     #LOGGER.info('Adding new Rachio Flex Schedule to %s Controller, %s(%s)',self.name, _flex_sched_name, _flex_sched_addr)
-                    self.parent.addNodeQueue(RachioFlexSchedule(self.parent, self.address, _flex_sched_addr, _flex_sched_name, f, self.device_id)) #v2.2.0, updated to add node to queue, rather that adding to ISY immediately
+                    self.parent.addNodeQueue(RachioFlexSchedule(self.parent, self.address, _flex_sched_addr, _flex_sched_name, f, self.device_id, self)) #v2.2.0, updated to add node to queue, rather that adding to ISY immediately
         except Exception as ex:
             _success = False
             LOGGER.error('Error discovering and adding Flex Schedules on Rachio Controller %s (%s): %s', self.name, self.address, str(ex))
 
         return _success
-
-    def update_info(self, force=False):
-        _running = False #initialize variable so that it could be used even if there was not a need to update the running status of the controller
+        
+    def getDeviceInfo(self, force=False):
         try:
             #Get latest device info and populate drivers
-            self.device = self.parent.r_api.device.get(self.device_id)[1]
+            _secSinceDeviceUpdate = (datetime.now() - self.lastDeviceUpdateTime).total_seconds()
+            if (_secSinceDeviceUpdate > 5 and force and self.discoverComplete) or _secSinceDeviceUpdate > 3600:
+                _device = self.parent.r_api.device.get(self.device_id)
+                self.device = _device[1]
+                self.lastDeviceUpdateTime = datetime.now()
+                LOGGER.debug('Obtained Device Info for %s, %s/%s API requests remaining until %s', str(self.device_id), str(_device[0]['x-ratelimit-remaining']), str(_device[0]['x-ratelimit-limit']),str(_device[0]['x-ratelimit-reset']))
+                            
+        except Exception as ex:
+            LOGGER.error('Connection Error on %s Rachio Controller API Request. This could mean an issue with internet connectivity or Rachio servers, normally safe to ignore. %s', self.name, str(ex))
             
-            self.currentSchedule = self.parent.r_api.device.getCurrentSchedule(self.device_id)[1]
+        return self.device
+            
+    def getCurrentSchedule(self, force=False):
+        try:
+              
+            _secSinceSchedUpdate = (datetime.now() - self.lastSchedUpdateTime).total_seconds()
+            if (_secSinceSchedUpdate > 5 and force and self.discoverComplete) or _secSinceSchedUpdate > 3600:
+                _sched = self.parent.r_api.device.getCurrentSchedule(self.device_id)
+                self.currentSchedule = _sched[1]
+                self.lastSchedUpdateTime = datetime.now()
+                LOGGER.debug('Obtained Device Schedule for %s, %s/%s API requests remaining until %s', str(self.device_id), str(_sched[0]['x-ratelimit-remaining']), str(_sched[0]['x-ratelimit-limit']),str(_sched[0]['x-ratelimit-reset']))
 
         except Exception as ex:
-            LOGGER.error('Connection Error on %s Rachio Controller refreshState. This could mean an issue with internet connectivity or Rachio servers, normally safe to ignore. %s', self.name, str(ex))
+            LOGGER.error('Connection Error on %s Rachio Controller current schedule API Request. This could mean an issue with internet connectivity or Rachio servers, normally safe to ignore. %s', self.name, str(ex))
             return False
+            
+        return self.currentSchedule
+
+    def update_info(self, force=False, queryAPI=True):
+        _running = False #initialize variable so that it could be used even if there was not a need to update the running status of the controller
+        self.getDeviceInfo(force=queryAPI)
+        self.getCurrentSchedule(force=queryAPI)
             
         # ST -> Status (whether Rachio is running a schedule or not)
         try:
@@ -291,7 +473,10 @@ class RachioController(polyinterface.Node):
 
         # GV2 -> "Paused"
         try:
-            self.setDriver('GV2', int(self.device['paused']))
+            if 'paused' in self.device:
+                self.setDriver('GV2', int(self.device['paused']))
+            else:
+                self.setDriver('GV2', 0)
         except Exception as ex:
             LOGGER.error('Error updating paused status on %s Rachio Controller. %s', self.name, str(ex))
 
@@ -325,8 +510,9 @@ class RachioController(polyinterface.Node):
         # GV4 -> Active Zone #
         if 'zoneId' in self.currentSchedule:
             try:
-                _active_zone = self.parent.r_api.zone.get(self.currentSchedule['zoneId'])[1]
-                self.setDriver('GV4',_active_zone['zoneNumber'])
+                if queryAPI:
+                    _active_zone = self.currentSchedule['zoneId']
+                    self.setDriver('GV4',_active_zone[1]['zoneNumber'])
             except Exception as ex:
                 LOGGER.error('Error updating active zone on %s Rachio Controller. %s', self.name, str(ex))
         else: #no schedule running:
@@ -377,37 +563,14 @@ class RachioController(polyinterface.Node):
             else: self.setDriver('GV9',0) #no schedule active
         except Exception as ex:
             LOGGER.error('Error trying to retrieve total cycle count on %s Rachio Controller. %s', self.name, str(ex))
-
-        # GV11 -> Minutes until next automatic schedule start
-        # GV12 -> Type of next schedule (FLEX, or FIXED)
-        try:
-            self.scheduleItems = self.parent.r_api.device.getScheduleItem(self.device_id)[1]
-            if len(self.scheduleItems) > 0:
-                _current_time = int(time.time())
-                _next_start_time = int(self.scheduleItems[0]['absoluteStartDate'] / 1000.) #TODO: Looks like earliest schedule is always in the 0th element, but might need to actually loop through and check.
-                _seconds_remaining = max(_next_start_time - _current_time,0)
-                _minutes_remaining = round(_seconds_remaining / 60. ,1)
-                self.setDriver('GV11',_minutes_remaining)
-
-                _scheduleType = self.scheduleItems[0]['scheduleType']
-                _scheduleVal = 3 #default to "OTHER" in case an unexpected item is returned (API documentation does not include exhaustive list of possibilities)
-                for key in self.scheduleTypes:
-                    if self.scheduleTypes[key].lower() == _scheduleType.lower():
-                        _scheduleVal = key
-                        break
-                self.setDriver('GV12',_scheduleVal)
-            else: 
-                self.setDriver('GV11',0.0)
-                self.setDriver('GV12',0)
-        except Exception as ex:
-            LOGGER.error('Error trying to retrieve minutes remaining/type of next planned schedule on %s Rachio Controller. %s', self.name, str(ex))
-        
+       
         if force: self.reportDrivers()
         return True
+    
 
     def query(self, command = None):
         LOGGER.info('query command received on %s Rachio Controller.', self.name)
-        self.update_info(force=True)
+        self.update_info(force=True,queryAPI=True)
         return True
 
     def enable(self, command): #Enables Rachio (schedules, weather intelligence, water budget, etc...)
@@ -415,7 +578,7 @@ class RachioController(polyinterface.Node):
         while self._tries < 2: #TODO: the first command to the Rachio server fails frequently for some reason with an SSL WRONG_VERSION_NUMBER error.  This is a temporary workaround to try a couple of times before giving up
             try:
                 self.parent.r_api.device.on(self.device_id)
-                self.update_info()
+                #self.update_info() Rely on webhook to update on device's change in status
                 LOGGER.info('Command received to enable %s Controller',self.name)
                 self._tries = 0
                 return True
@@ -429,7 +592,7 @@ class RachioController(polyinterface.Node):
         while self._tries < 2: #TODO: the first command to the Rachio server fails frequently for some reason with an SSL WRONG_VERSION_NUMBER error.  This is a temporary workaround to try a couple of times before giving up
             try:
                 self.parent.r_api.device.off(self.device_id)
-                self.update_info()
+                #self.update_info() Rely on webhook to update on device's change in status
                 LOGGER.info('Command received to disable %s Controller',self.name)
                 self._tries = 0
                 return True
@@ -444,7 +607,7 @@ class RachioController(polyinterface.Node):
             try:
                 self.parent.r_api.device.stopWater(self.device_id)
                 LOGGER.info('Command received to stop watering on %s Controller',self.name)
-                self.update_info()
+                #self.update_info() Rely on webhook to update on device's change in status
                 self._tries = 0
                 return True
             except Exception as ex:
@@ -464,7 +627,7 @@ class RachioController(polyinterface.Node):
                 try:
                     _seconds = int(float(_minutes) * 60.)
                     self.parent.r_api.device.rainDelay(self.device_id, _seconds)
-                    self.update_info()
+                    #self.update_info() Rely on webhook to update on device's change in status
                     self._tries = 0
                     return True
                 except Exception as ex:
@@ -483,18 +646,17 @@ class RachioController(polyinterface.Node):
                {'driver': 'GV7', 'value': 0, 'uom': 2}, #Cycling (True/False)
                {'driver': 'GV8', 'value': 0, 'uom': 56}, #Cycle Count (Raw Value)
                {'driver': 'GV9', 'value': 0, 'uom': 56}, #Total Cycle Count (Raw Value)
-               {'driver': 'GV10', 'value': 0, 'uom': 25}, #Current Schedule Type (Enumeration)
-               {'driver': 'GV11', 'value': 0, 'uom': 45}, #Minutes until next automatic schedule start (Minutes)
-               {'driver': 'GV12', 'value': 0, 'uom': 25} #Type of next schedule (Enumeration)
+               {'driver': 'GV10', 'value': 0, 'uom': 25} #Current Schedule Type (Enumeration)
                ]
 
     id = 'rachio_device'
     commands = {'DON': enable, 'DOF': disable, 'QUERY': query, 'STOP': stopCmd, 'RAIN_DELAY': rainDelay}
 
 class RachioZone(polyinterface.Node):
-    def __init__(self, parent, primary, address, name, zone, device_id):
+    def __init__(self, parent, primary, address, name, zone, device_id, device):
         super().__init__(parent, primary, address, name)
         self.device_id = device_id
+        self.device = device
         self.zone = zone
         self.zone_id = zone['id']
         self.name = name
@@ -504,21 +666,27 @@ class RachioZone(polyinterface.Node):
         self._tries = 0
 
     def start(self):
-        self.update_info()
+        self.update_info(force=True,queryAPI=True)
 
     def discover(self, command=None):
         # No discovery needed (no nodes are subordinate to Zones)
         pass
 
-    def update_info(self, force=False):
+    def update_info(self, force=False, queryAPI=True):
         _running = False #initialize variable so that it could be used even if there was not a need to update the running status of the zone
-        #pdating info for zone %s with id %s, force=%s',self.address, str(self.zone_id), str(force))
+        #Updating info for zone %s with id %s, force=%s',self.address, str(self.zone_id), str(force))
         try:
-            #Get latest zone info and populate drivers
-            self.zone = self.parent.r_api.zone.get(self.zone_id)[1]
-            self.currentSchedule = self.parent.r_api.device.getCurrentSchedule(self.device_id)[1]
+            _deviceInfo = self.device.getDeviceInfo(force=queryAPI)
+            for z in _deviceInfo['zones']:
+                _zone_id = str(z['id'])
+                if _zone_id == self.zone_id:
+                    self.zone = z
+                    break
+            
+            self.currentSchedule = self.device.getCurrentSchedule(force=queryAPI)
+
         except Exception as ex:
-            LOGGER.error('Connection Error on %s Rachio zone. This could mean an issue with internet connectivity or Rachio servers, normally safe to ignore. %s', self.name, str(ex))
+            LOGGER.error(' Error retrieving zone info for "%s"', self.name, str(ex))
             return False
             
         # ST -> Status (whether Rachio zone is running a schedule or not)
@@ -558,27 +726,27 @@ class RachioZone(polyinterface.Node):
         except Exception as ex:
             LOGGER.error('Error updating root zone depth on %s Rachio Zone. %s', self.name, str(ex))
 
-		# GV4 -> allowed depletion
+        # GV4 -> allowed depletion
         # TODO: Not 100% sure what this is or if the units are correct, need to see if Rachio has any additional info
         try:
             self.setDriver('GV4', self.zone['managementAllowedDepletion'])
         except Exception as ex:
             LOGGER.error('Error updating allowed depletion on %s Rachio Zone. %s', self.name, str(ex))
 
-		# GV5 -> efficiency
+        # GV5 -> efficiency
         try:
             self.setDriver('GV5', int(self.zone['efficiency'] * 100.))
         except Exception as ex:
             LOGGER.error('Error updating efficiency on %s Rachio Zone. %s', self.name, str(ex))
 
-		# GV6 -> square feet
+        # GV6 -> square feet
         # TODO: This is in square feet, but there's no unit available in the ISY for square feet.  Update if UDI makes it available
         try:
             self.setDriver('GV6', self.zone['yardAreaSquareFeet'])
         except Exception as ex:
             LOGGER.error('Error updating square footage on %s Rachio Zone. %s', self.name, str(ex))
 
-		# GV7 -> irrigation amount
+        # GV7 -> irrigation amount
         # TODO: Not 100% sure what this is or if the units are correct, need to see if Rachio has any additional info
         try:
             if 'irrigationAmount' in self.zone:
@@ -588,21 +756,21 @@ class RachioZone(polyinterface.Node):
         except Exception as ex:
             LOGGER.error('Error updating irrigation amount on %s Rachio Zone. %s', self.name, str(ex))
 
-		# GV8 -> depth of water
+        # GV8 -> depth of water
         # TODO: Not 100% sure what this is or if the units are correct, need to see if Rachio has any additional info
         try:
             self.setDriver('GV8', self.zone['depthOfWater'])
         except Exception as ex:
             LOGGER.error('Error updating depth of water on %s Rachio Zone. %s', self.name, str(ex))
 
-		# GV9 -> runtime
+        # GV9 -> runtime
         # TODO: Not 100% sure what this is or if the units are correct, need to see if Rachio has any additional info
         try:
             self.setDriver('GV9', self.zone['runtime'])
         except Exception as ex:
             LOGGER.error('Error updating runtime on %s Rachio Zone. %s', self.name, str(ex))
 
-		# GV10 -> inches per hour
+        # GV10 -> inches per hour
         try:
             self.setDriver('GV10', self.zone['customNozzle']['inchesPerHour'])
         except Exception as ex:
@@ -613,7 +781,7 @@ class RachioZone(polyinterface.Node):
 
     def query(self, command = None):
         LOGGER.info('query command received on %s Rachio Zone', self.name)
-        self.update_info(force=True)
+        self.update_info(force=True,queryAPI=True)
         return True
 
     def startCmd(self, command):
@@ -631,7 +799,7 @@ class RachioZone(polyinterface.Node):
                     _seconds = int(float(_minutes) * 60.)
                     self.parent.r_api.zone.start(self.zone_id, _seconds)
                     LOGGER.info('Command received to start watering zone %s for %s minutes',self.name, str(_minutes))
-                    self.update_info()
+                    #self.update_info() Rely on webhook to update on device's change in status
                     self._tries = 0
                     return True
                 except Exception as ex:
@@ -657,9 +825,10 @@ class RachioZone(polyinterface.Node):
     commands = {'QUERY': query, 'START': startCmd}
 
 class RachioSchedule(polyinterface.Node):
-    def __init__(self, parent, primary, address, name, schedule, device_id):
+    def __init__(self, parent, primary, address, name, schedule, device_id, device):
         super().__init__(parent, primary, address, name)
         self.device_id = device_id
+        self.device = device
         self.schedule = schedule
         self.schedule_id = schedule['id']
         self.name = name
@@ -669,22 +838,28 @@ class RachioSchedule(polyinterface.Node):
         self._tries = 0
 
     def start(self):
-        self.update_info()
+        self.update_info(force=True,queryAPI=True)
 
     def discover(self, command=None):
         # No discovery needed (no nodes are subordinate to Schedules)
         pass
         
-    def update_info(self, force=False):
+    def update_info(self, force=False, queryAPI=True):
         _running = False #initialize variable so that it could be used even if there was not a need to update the running status of the schedule
         try:
-            #Get latest schedule info and populate drivers
-            self.schedule = self.parent.r_api.schedulerule.get(self.schedule_id)[1]
-            self.currentSchedule = self.parent.r_api.device.getCurrentSchedule(self.device_id)[1]
-        except Exception as ex:
-            LOGGER.error('Connection Error on %s Rachio schedule. This could mean an issue with internet connectivity or Rachio servers, normally safe to ignore. %s', self.name, str(ex))
-            return False
+            _deviceInfo = self.device.getDeviceInfo(force=queryAPI)
+            for s in _deviceInfo['scheduleRules']:
+                _sched_id = str(s['id'])
+                if _sched_id == self.schedule_id:
+                    self.schedule = s
+                    break
             
+            self.currentSchedule = self.device.getCurrentSchedule(force=queryAPI)
+
+        except Exception as ex:
+            LOGGER.error(' Error retrieving schedule info for "%s"', self.name, str(ex))
+            return False
+                  
         # ST -> Status (whether Rachio schedule is running a schedule or not)
         try:
             if 'scheduleRuleId' in self.currentSchedule:
@@ -703,7 +878,10 @@ class RachioSchedule(polyinterface.Node):
 
         # GV1 -> "rainDelay" status
         try:
-            self.setDriver('GV1',int(self.schedule['rainDelay']))
+            if 'rainDelay' in self.schedule:
+                self.setDriver('GV1',int(self.schedule['rainDelay']))
+            else:
+                self.setDriver('GV1',0)
         except Exception as ex:
             LOGGER.error('Error updating schedule rain delay on %s Rachio Schedule. %s', self.name, str(ex))
 
@@ -717,38 +895,18 @@ class RachioSchedule(polyinterface.Node):
 
         # GV3 -> seasonal adjustment
         try:
-            _seasonalAdjustment = float(self.schedule['seasonalAdjustment']) * 100.
-            self.setDriver('GV3', _seasonalAdjustment)
+            if 'seasonalAdjustment' in self.schedule:
+                _seasonalAdjustment = float(self.schedule['seasonalAdjustment']) * 100.
+                self.setDriver('GV3', _seasonalAdjustment)
         except Exception as ex:
             LOGGER.error('Error updating seasonal adjustment on %s Rachio Schedule. %s', self.name, str(ex))
-
-        # GV4 -> Minutes until next automatic schedule start
-        try:
-            self.scheduleItems = self.parent.r_api.device.getScheduleItem(self.device_id)[1]
-            if len(self.scheduleItems) > 0:
-                _current_time = int(time.time())
-                _next_start_time = 0
-                for _item in self.scheduleItems: #find the lowest planned start time for this schedule:
-                    if _item['scheduleRuleId'] == self.schedule_id:
-                        if _next_start_time == 0 or _item['absoluteStartDate'] < _next_start_time:
-                            _next_start_time = _item['absoluteStartDate']
-                
-                _next_start_time = int(_next_start_time / 1000.)
-                _seconds_remaining = max(_next_start_time - _current_time,0)
-                _minutes_remaining = round(_seconds_remaining / 60. ,1)
-                self.setDriver('GV4',_minutes_remaining)
-
-            else: 
-                self.setDriver('GV4',0.0)
-        except Exception as ex:
-            LOGGER.error('Error trying to retrieve minutes remaining until next run of %s Rachio Schedule. %s', self.name, str(ex))
 
         if force: self.reportDrivers()
         return True
         
     def query(self, command = None):
         LOGGER.info('query command received on %s Rachio Schedule.', self.name)
-        self.update_info(force=True)
+        self.update_info(force=True,queryAPI=True)
         return True
 
     def startCmd(self, command):
@@ -757,7 +915,7 @@ class RachioSchedule(polyinterface.Node):
             try:
                 self.parent.r_api.schedulerule.start(self.schedule_id)
                 LOGGER.info('Command received to start watering schedule %s',self.name)
-                self.update_info()
+                #self.update_info() Rely on webhook to update on device's change in status
                 self._tries = 0
                 return True
             except Exception as ex:
@@ -771,7 +929,7 @@ class RachioSchedule(polyinterface.Node):
             try:
                 self.parent.r_api.schedulerule.skip(self.schedule_id)
                 LOGGER.info('Command received to skip watering schedule %s',self.name)
-                self.update_info()
+                #self.update_info() Rely on webhook to update on device's change in status
                 self._tries = 0
                 return True
             except Exception as ex:
@@ -788,7 +946,7 @@ class RachioSchedule(polyinterface.Node):
                     _value = _value / 100.
                     self.parent.r_api.schedulerule.seasonalAdjustment(self.schedule_id, _value)
                     LOGGER.info('Command received to change seasonal adjustment on schedule %s to %s',self.name, str(_value))
-                    self.update_info()
+                    #self.update_info() Rely on webhook to update on device's change in status
                     self._tries = 0
                     return True
                 else:
@@ -803,17 +961,17 @@ class RachioSchedule(polyinterface.Node):
                {'driver': 'GV0', 'value': 0, 'uom': 2}, #Enabled (True/False)
                {'driver': 'GV1', 'value': 0, 'uom': 2}, #Rain Delay (True/False)
                {'driver': 'GV2', 'value': 0, 'uom': 45}, #Duration (Minutes)
-               {'driver': 'GV3', 'value': 0, 'uom': 51}, #Seasonal Adjustment (Percent)
-               {'driver': 'GV4', 'value': 0, 'uom': 45} #Time until next Schedule Start (Minutes)
+               {'driver': 'GV3', 'value': 0, 'uom': 51} #Seasonal Adjustment (Percent)
                ]
 
     id = 'rachio_schedule'
     commands = {'QUERY': query, 'START': startCmd, 'SKIP':skip, 'ADJUST':seasonalAdjustment}
 
 class RachioFlexSchedule(polyinterface.Node):
-    def __init__(self, parent, primary, address, name, schedule, device_id):
+    def __init__(self, parent, primary, address, name, schedule, device_id, device):
         super().__init__(parent, primary, address, name)
         self.device_id = device_id
+        self.device = device
         self.schedule = schedule
         self.schedule_id = schedule['id']
         self.name = name
@@ -822,22 +980,28 @@ class RachioFlexSchedule(polyinterface.Node):
         self._tries = 0
 
     def start(self):
-        self.update_info()
+        self.update_info(force=True,queryAPI=True)
 
     def discover(self, command=None):
         # No discovery needed (no nodes are subordinate to Flex Schedules)
         pass
 
-    def update_info(self, force=False):
+    def update_info(self, force=False, queryAPI=True):
         _running = False #initialize variable so that it could be used even if there was not a need to update the running status of the schedule
         try:
-            #Get latest schedule info and populate drivers
-            self.schedule = self.parent.r_api.flexschedulerule.get(self.schedule_id)[1]
-            self.currentSchedule = self.parent.r_api.device.getCurrentSchedule(self.device_id)[1]
-        except Exception as ex:
-            LOGGER.error('Connection Error on %s Rachio schedule. This could mean an issue with internet connectivity or Rachio servers, normally safe to ignore. %s', self.name, str(ex))
-            return False
+            _deviceInfo = self.device.getDeviceInfo(force=queryAPI)
+            for s in _deviceInfo['flexScheduleRules']:
+                _sched_id = str(s['id'])
+                if _sched_id == self.schedule_id:
+                    self.schedule = s
+                    break
             
+            self.currentSchedule = self.device.getCurrentSchedule(force=queryAPI)
+
+        except Exception as ex:
+            LOGGER.error(' Error retrieving flex schedule info for "%s"', self.name, str(ex))
+            return False
+        
         # ST -> Status (whether Rachio schedule is running a schedule or not)
         try:
             if 'scheduleRuleId' in self.currentSchedule:
@@ -861,44 +1025,61 @@ class RachioFlexSchedule(polyinterface.Node):
             self.setDriver('GV2', _minutes)
         except Exception as ex:
             LOGGER.error('Error updating total duration on %s Rachio FlexSchedule. %s', self.name, str(ex))
-
-        # GV4 -> Minutes until next automatic schedule start
-        try:
-            self.scheduleItems = self.parent.r_api.device.getScheduleItem(self.device_id)[1]
-            if len(self.scheduleItems) > 0:
-                _current_time = int(time.time())
-                _next_start_time = 0
-                for _item in self.scheduleItems: #find the lowest planned start time for this schedule:
-                    if _item['scheduleRuleId'] == self.schedule_id:
-                        if _next_start_time == 0 or _item['absoluteStartDate'] < _next_start_time:
-                            _next_start_time = _item['absoluteStartDate']
-                
-                _next_start_time = int(_next_start_time / 1000.)
-                _seconds_remaining = max(_next_start_time - _current_time,0)
-                _minutes_remaining = round(_seconds_remaining / 60. ,1)
-                self.setDriver('GV4',_minutes_remaining)
-
-            else: 
-                self.setDriver('GV4',0.0)
-        except Exception as ex:
-            LOGGER.error('Error trying to retrieve minutes remaining until next run of %s Rachio FlexSchedule. %s', self.name, str(ex))
-        
+      
         if force: self.reportDrivers()
 
     def query(self, command = None):
         LOGGER.info('query command received on %s Rachio Flex Schedule', self.name)
-        self.update_info(force=True)
+        self.update_info(force=True,queryAPI=True)
         return True
 
     drivers = [{'driver': 'ST', 'value': 0, 'uom': 78}, #Running (On/Off)
                {'driver': 'GV0', 'value': 0, 'uom': 2}, #Enabled (True/False)
-               {'driver': 'GV2', 'value': 0, 'uom': 45}, #Duration (Minutes)
-               {'driver': 'GV4', 'value': 0, 'uom': 45} #Time until next Schedule Start (Minutes)
+               {'driver': 'GV2', 'value': 0, 'uom': 45} #Duration (Minutes)
                ]
 
     id = 'rachio_flexschedule'
     commands = {'QUERY': query}
-
+    
+class webSocketHandler(BaseHTTPRequestHandler): #From example at https://gist.github.com/mdonkers/63e115cc0c79b4f6b8b3a6b797e485c7
+       
+    def do_POST(self):
+        try:
+            self.data_string = self.rfile.read(int(self.headers['Content-Length'])).decode('utf-8')
+            _json_data = json.loads(self.data_string)
+            LOGGER.debug('Received websocket notification from Rachio: %s',str(_json_data))
+            
+            if 'deviceId' in _json_data:
+                _deviceID = _json_data['deviceId']
+                for node in self.server.controller.nodes:
+                    if self.server.controller.nodes[node].device_id == _deviceID:
+                        self.server.controller.nodes[node].update_info(force=False,queryAPI=True)
+                        break
+                        
+            self.send_response(200)
+                        
+        except Exception as ex:
+            LOGGER.error('Error processing POST request to HTTP Server: %s', str(ex))
+            self.send_error(404)
+        return
+            
+    def do_GET(self):
+        try:
+            if None != re.search('/test*', self.path):
+                self.send_response(200)
+                self.send_header('Content-Type','application/json')
+                self.end_headers()
+                data = '{"success": "True"}'
+                self.wfile.write(data.encode('utf-8'))
+            else:
+                self.send_response(400, 'Bad Request: record does not exist')
+                self.send_header('Content-Type','application/json')
+                self.end_headers()
+        except Exception as ex:
+            LOGGER.error('Error processing GET request to HTTP Server: %s', str(ex))
+            self.send_error(404)
+        return
+    
 if __name__ == "__main__":
     try:
         polyglot = polyinterface.Interface('Rachio')
@@ -906,4 +1087,8 @@ if __name__ == "__main__":
         control = Controller(polyglot)
         control.runForever()
     except (KeyboardInterrupt, SystemExit):
+        try:
+            control.webSocketServer.server_close()
+        except:
+            pass
         sys.exit(0)
