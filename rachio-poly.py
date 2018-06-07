@@ -18,8 +18,11 @@ import threading
 from rachiopy import Rachio
  
 LOGGER = polyinterface.LOGGER
-SERVERDATA = json.load(open('server.json'))
+FILE = open('server.json')
+SERVERDATA = json.load(FILE)
 VERSION = SERVERDATA['credits'][0]['version']
+FILE.close()
+    
 _HTTP = httplib2.Http()
 WS_EVENT_TYPES = {
         "DEVICE_STATUS_EVENT": 5,
@@ -141,7 +144,7 @@ class Controller(polyinterface.Controller):
         
     def testWebSocketConnectivity(self, host, port):
         try:
-            _url = 'http://' + host + ':' + port + '/test'
+            _url = 'http://' + host + ':' + str(port) + '/test'
             LOGGER.info('Testing connectivity to %s:%s', str(host), str(port))
             _headers = {'Content-Type': 'application/json'}
             (_resp, _content) = _HTTP.request(_url, 'GET', headers=_headers)
