@@ -514,8 +514,14 @@ class RachioController(polyinterface.Node):
         if 'zoneId' in self.currentSchedule:
             try:
                 if queryAPI:
-                    _active_zone = self.currentSchedule['zoneId']
-                    self.setDriver('GV4',_active_zone[1]['zoneNumber'])
+                    _active_zoneId = self.currentSchedule['zoneId']
+                    _zones = self.device['zones']
+                    for z in _zones:
+                        _zone_id = str(z['id'])
+                        if _zone_id == _active_zoneId:
+                            _zone_num = str(z['zoneNumber'])
+                            self.setDriver('GV4',_zone_num)
+                            break
             except Exception as ex:
                 LOGGER.error('Error updating active zone on %s Rachio Controller. %s', self.name, str(ex))
         else: #no schedule running:
@@ -1059,11 +1065,11 @@ class webSocketHandler(BaseHTTPRequestHandler): #From example at https://gist.gi
                         self.server.controller.nodes[node].update_info(force=False,queryAPI=True)
                         break
                         
-            self.send_response(200)
+                self.send_response(200) #v2.4.2: Removed http server response to invalid requests
                         
         except Exception as ex:
             LOGGER.error('Error processing POST request to HTTP Server: %s', str(ex))
-            self.send_error(404)
+            #self.send_error(404) #v2.4.2: Removed http server response to invalid requests
         return
             
     def do_GET(self):
@@ -1075,12 +1081,14 @@ class webSocketHandler(BaseHTTPRequestHandler): #From example at https://gist.gi
                 data = '{"success": "True"}'
                 self.wfile.write(data.encode('utf-8'))
             else:
-                self.send_response(400, 'Bad Request: record does not exist')
-                self.send_header('Content-Type','application/json')
-                self.end_headers()
+                #v2.4.2: Removed http server response to invalid requests
+                pass
+                #self.send_response(400, 'Bad Request: record does not exist')
+                #self.send_header('Content-Type','application/json')
+                #self.end_headers()
         except Exception as ex:
             LOGGER.error('Error processing GET request to HTTP Server: %s', str(ex))
-            self.send_error(404)
+            #self.send_error(404) #v2.4.2: Removed http server response to invalid requests
         return
     
 if __name__ == "__main__":

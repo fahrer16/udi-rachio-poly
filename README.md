@@ -40,6 +40,7 @@ Any Rachio units associated with the specified API key should now show up in the
 * 2.3.3: Bug fixes for schedule durations and season adjustment commands
 * 2.4.0: Updated to accommodate changes in Rachio Cloud API.  Added websocket support and caching to minimize API calls.  Removed drivers for "time until next schedule run" because required info was removed from Rachio API.
 * 2.4.1: Corrected bug where error is generated if 'port' configuration parameter not defined.  Added closure of server.json file.
+* 2.4.2: Corrected bug on setting controller active zone when watering.  Removed http server response to invalid requests.
 
 ## Known Issues:
 1. Icons for Rachio Nodes should show up as Irrigation but show up as Bulb.  Appears to be an issue with ISY994i not accepting Irrigation icon type from NLS definition.
