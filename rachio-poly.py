@@ -11,11 +11,14 @@ from copy import deepcopy
 import json, time
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
-import httplib2
+import http.client
 import re
 from threading import Timer #Added version 2.2.0 for node addition queue
 import threading
 from rachiopy import Rachio
+import ssl
+from pathlib import Path
+#from socketserver import ThreadingMixIn
  
 LOGGER = polyinterface.LOGGER
 FILE = open('server.json')
@@ -23,18 +26,20 @@ SERVERDATA = json.load(FILE)
 VERSION = SERVERDATA['credits'][0]['version']
 FILE.close()
     
-_HTTP = httplib2.Http()
 WS_EVENT_TYPES = {
-        "DEVICE_STATUS_EVENT": 5,
-        "RAIN_DELAY_EVENT": 6,
-        "WEATHER_INTELLIGENCE_EVENT": 7,
+        "DEVICE_STATUS": 5,
+        "RAIN_DELAY": 6,
+        "WEATHER_INTELLIGENCE": 7,
         "WATER_BUDGET": 8,
-        "SCHEDULE_STATUS_EVENT": 9,
-        "ZONE_STATUS_EVENT": 10,
-        "RAIN_SENSOR_DETECTION_EVENT": 11,
+        "SCHEDULE_STATUS": 9,
+        "ZONE_STATUS": 10,
+        "RAIN_SENSOR_DETECTION": 11,
         "ZONE_DELTA": 12,
         "DELTA": 14
     }
+
+#class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+#        """Handle requests in a separate thread."""
 
 class Controller(polyinterface.Controller):
     """
@@ -62,7 +67,7 @@ class Controller(polyinterface.Controller):
                   which never happens.
     """
     def __init__(self, polyglot):
-        super(Controller, self).__init__(polyglot)
+        super().__init__(polyglot)
         self.name = 'Rachio Bridge'
         #Queue for nodes to be added in order to prevent a flood of nodes from being created on discovery.  Added version 2.2.0
         self.nodeQueue = {}
@@ -72,6 +77,7 @@ class Controller(polyinterface.Controller):
         self.httpPort = 3001
         self.httpHost = ''
         self.device_id = ''
+        self.use_ssl = False
 
     def start(self):
         LOGGER.info('Starting Rachio Polyglot v2 NodeServer version {}'.format(VERSION))
@@ -90,9 +96,9 @@ class Controller(polyinterface.Controller):
         ###Start HTTP Server for Websockets####
         try:
             if 'port' in self.polyConfig['customParams']:
-                self.httpPort = self.polyConfig['customParams']['port']
+                self.httpPort = int(self.polyConfig['customParams']['port'])
             else:
-                LOGGER.error('No HTTP Port specified in Rachio configuration for Websocket endpoint.  Using port %s for now.  Enter custom parameter of \'port\' in Polyglot configuration.', str(self.httpPort))
+                LOGGER.info('No HTTP Port specified in Rachio configuration for Websocket endpoint.  Using port %s for now.  Enter custom parameter of \'port\' in Polyglot configuration.', str(self.httpPort))
             LOGGER.info('Ensure router/firewall is set to forward requests to polyglot host on port %s',str(self.httpPort))
         except Exception as ex:
             LOGGER.error('Error reading webSocket Port from Polyglot Configuration: %s', str(ex))
@@ -109,11 +115,30 @@ class Controller(polyinterface.Controller):
             LOGGER.error('Error reading webSocket host name from Polyglot Configuration: %s', str(ex))
             sys.exit(0)
             return False
+
+        if 'certfile' in self.polyConfig['customParams']:
+            certfile = self.polyConfig['customParams']['certfile']
+            LOGGER.debug('Trying custom key file: {}'.format(certfile))
+        else:
+            certfile = 'certificate.pem'
+            LOGGER.debug('Trying default key file: {}'.format(certfile))
+        if Path(certfile).is_file():
+            LOGGER.debug('Certificate file exists, enabling SSL')
+            self.use_ssl = True
+        else:
+            LOGGER.debug('Can\'t locate certificate, SSL disabled')
         
         try:
             LOGGER.debug('Starting Websocket HTTP Server')
-            self.webSocketServer = HTTPServer(('', int(self.httpPort)), webSocketHandler)
+            # self.webSocketServer = ThreadedHTTPServer(('', self.httpPort), webSocketHandler)
+            self.webSocketServer = HTTPServer(('', self.httpPort), webSocketHandler)
             self.webSocketServer.controller = self #To allow handler to access this class when receiving a request from Rachio servers
+            if self.use_ssl:
+                try:
+                    self.webSocketServer.socket = ssl.wrap_socket(self.webSocketServer.socket, certfile=certfile, server_side=True)
+                except Exception as ex:
+                    LOGGER.error('SSL Error: {}'.format(str(ex)))
+                    self.use_ssl = False
             self.httpThread = threading.Thread(target=self.webSocketServer.serve_forever, daemon=True).start()
         except Exception as ex:
             LOGGER.error('Error starting webSocket server: %s', str(ex))
@@ -144,13 +169,18 @@ class Controller(polyinterface.Controller):
         
     def testWebSocketConnectivity(self, host, port):
         try:
-            _url = 'http://' + host + ':' + str(port) + '/test'
+            if self.use_ssl:
+                conn = http.client.HTTPSConnection(host, port=port)
+            else:
+                conn = http.client.HTTPConnection(host, port=port)
             LOGGER.info('Testing connectivity to %s:%s', str(host), str(port))
             _headers = {'Content-Type': 'application/json'}
-            (_resp, _content) = _HTTP.request(_url, 'GET', headers=_headers)
-            content_type = _resp.get('content-type')
+            conn.request('GET', '/test', headers=_headers)
+            _resp = conn.getresponse()
+            content_type = _resp.getheader('Content-Type')
+            conn.close()
             if content_type and content_type.startswith('application/json'):
-                _content = json.loads(_content.decode('UTF-8'))
+                _content = json.loads(_resp.read().decode())
                 if 'success' in _content:
                     if _content['success'] == "True":
                         LOGGER.info('Connectivity test to %s:%s succeeded', str(host), str(port))
@@ -170,7 +200,10 @@ class Controller(polyinterface.Controller):
             
     def configureWebSockets(self, WS_deviceID):
         #Get the webSockets configured for the specified device.  Delete any older, inappropriate websockets and create new ones as needed
-        _url = 'http://' + self.httpHost + ':' + self.httpPort
+        if self.use_ssl:
+            _url = 'https://' + self.httpHost + ':' + str(self.httpPort)
+        else:
+            _url = 'http://' + self.httpHost + ':' + str(self.httpPort)
         
         #Build event types array:
         _eventTypes = []
@@ -185,9 +218,9 @@ class Controller(polyinterface.Controller):
             for _websocket in _ws[1]:
                 if 'externalId' in _websocket and 'url' in _websocket and 'id' in _websocket and 'eventTypes' in _websocket:
                     if _websocket['externalId'] == 'polyglot' and not _websocketFound: #This is the first polyglot-created websocket
-                        if self.httpHost not in _websocket['url']:
+                        if _url not in _websocket['url']:
                             #Polyglot websocket but url does not match currently configured host and port
-                            LOGGER.info('Websocket %s found but url (%s) is not correct, updating', str(_websocket['id']), str(_websocket['url']))
+                            LOGGER.info('Websocket %s found but url (%s) is not correct, updating to %s', str(_websocket['id']), str(_websocket['url']), _url)
                             try:
                                 _updateWS = self.r_api.notification.putWebhook(_websocket['id'], 'polyglot', _url, _eventTypes)
                                 LOGGER.debug('Updated webhook %s, %s/%s API requests remaining until %s', str(_websocket['id']), str(_updateWS[0]['x-ratelimit-remaining']), str(_updateWS[0]['x-ratelimit-limit']),str(_updateWS[0]['x-ratelimit-reset']))
@@ -199,7 +232,15 @@ class Controller(polyinterface.Controller):
                             #URL is OK, check that all websocket event types are included:
                             _allEventsPresent = True
                             for key, value in WS_EVENT_TYPES.items():
-                                _allEventsPresent = _allEventsPresent and any(key in d for d in _websocket['eventTypes'])
+                                _found = False
+                                for d in _websocket['eventTypes']:
+                                    if d['name'] == key:
+                                        _found = True
+                                        break
+                                # WATER_BUDGET is never returned
+                                if not _found and key != 'WATER_BUDGET':
+                                    LOGGER.debug("Missing webhook: {}".format(key))
+                                    _allEventsPresent = False
                             
                             if not _allEventsPresent:
                                 #at least one websocket event is missing from the definition on the Rachio servers, updated the websocket:
@@ -1051,6 +1092,7 @@ class RachioFlexSchedule(polyinterface.Node):
     commands = {'QUERY': query}
     
 class webSocketHandler(BaseHTTPRequestHandler): #From example at https://gist.github.com/mdonkers/63e115cc0c79b4f6b8b3a6b797e485c7
+    # protocol_version='HTTP/1.1'
        
     def do_POST(self):
         try:
@@ -1065,7 +1107,8 @@ class webSocketHandler(BaseHTTPRequestHandler): #From example at https://gist.gi
                         self.server.controller.nodes[node].update_info(force=False,queryAPI=True)
                         break
                         
-                self.send_response(200) #v2.4.2: Removed http server response to invalid requests
+                self.send_response(204) #v2.4.2: Removed http server response to invalid requests
+                self.end_headers()
                         
         except Exception as ex:
             LOGGER.error('Error processing POST request to HTTP Server: %s', str(ex))
@@ -1077,8 +1120,9 @@ class webSocketHandler(BaseHTTPRequestHandler): #From example at https://gist.gi
             if None != re.search('/test*', self.path):
                 self.send_response(200)
                 self.send_header('Content-Type','application/json')
-                self.end_headers()
                 data = '{"success": "True"}'
+                self.send_header('Content-Length', len(data))
+                self.end_headers()
                 self.wfile.write(data.encode('utf-8'))
             else:
                 #v2.4.2: Removed http server response to invalid requests
