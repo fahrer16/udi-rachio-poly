@@ -9,15 +9,10 @@ This node server currently implements the Person, Device, and Zone leaves of the
 
 # Installation Instructions:
 1. Backup ISY (just in case)
-2. Clone the Rachio Node Server into the /.polyglot/nodeservers folder for the user that runs polyglot v2:
-`Assuming you're logged in as the user that runs polyglot, cd cd ~/.polyglot/nodeservers
-`git clone https://github.com/fahrer16/udi-rachio-poly.git
-3. Install pre-requisites using install.sh script
-  * 'chmod +x ./install.sh
-  * 'install.sh
-4. Add Node Server into Polyglot instance.
-  * Follow instructions here, starting with "Open Polyglot": https://github.com/Einstein42/udi-polyglotv2/wiki/Creating-a-NodeServer 
-5. Select port to use for Rachio websocket traffic to internal Polyglot server (defaults to 3001).  
+2. Install from Polyglot Store
+3. Enter the [Rachio API Key](https://rachio.readme.io/v1.0/docs) in the node server configuration.  See Polyglot Custom Configuration Parameters below.
+4. For **LOCAL** installs (Polisy or Raspberry PI, etc...), the node server must be set up to be able to receive messages from the Rachio cloud, known as [webhooks](https://support.rachio.com/hc/en-us/articles/115010542108-Public-API-documentation#:~:text=Rachio%27s%20public%20API%20has%20rate%20limiting%20in%20order,explore%20a%20non-polling%20method%2C%20we%20do%20support%20webhooks).  This requires a port to be forwarded to your node server instance so that the event can be received.  
+   Select port to use for Rachio websocket traffic to internal Polyglot server (defaults to 3001).  
   * Forward selected port to internal polyglot server.  
   * Add host and port keys to polyglot configuration (See custom configuration parameters below).  Note: Use of a Dynamic DNS service for the external host is recommended.
 
@@ -25,8 +20,8 @@ Any Rachio units associated with the specified API key should now show up in the
 
 ## Polyglot Custom Configuration Parameters
 * REQUIRED: Key:'api_key' Value: See "https://rachio.readme.io/v1.0/docs" for instructions on how to obtain Rachio API Key.
-* REQUIRED: Key: 'host' Value: External address for polyglot server (External static IP or Dynamic DNS host name).
-* OPTIONAL: Key: 'port' Value: External port (integer) for polyglot server.  Note: This port must be opened through firewall and forwarded to the internal polyglot server.  Defaults to '3001' if no entry given but opening port is not optional (required for Rachio websockets).
+* REQUIRED: Key: 'host' Value: External address for polyglot server (External static IP or Dynamic DNS host name).  Not required or used for polyglot cloud.
+* OPTIONAL: Key: 'port' Value: External port (integer) for polyglot server.  Note: This port must be opened through firewall and forwarded to the internal polyglot server.  Defaults to '3001' if no entry given but opening port is not optional (required for Rachio websockets).  ot required or used for polyglot cloud.
 * OPTIONAL: Key:'nodeAdditionInterval' Value: On discovery, nodes will be added at this interval (in seconds).
  
 ## Version History:
@@ -41,7 +36,4 @@ Any Rachio units associated with the specified API key should now show up in the
 * 2.4.0: Updated to accommodate changes in Rachio Cloud API.  Added websocket support and caching to minimize API calls.  Removed drivers for "time until next schedule run" because required info was removed from Rachio API.
 * 2.4.1: Corrected bug where error is generated if 'port' configuration parameter not defined.  Added closure of server.json file.
 * 2.4.2: Corrected bug on setting controller active zone when watering.  Removed http server response to invalid requests.
-
-## Known Issues:
-1. Icons for Rachio Nodes should show up as Irrigation but show up as Bulb.  Appears to be an issue with ISY994i not accepting Irrigation icon type from NLS definition.
-2. Commands that allow for a parameter value to be passed don't seem to be present in admin console unless the profile is uploaded twice.  May be an issue with ISY994i (This was developed using version 5.0.10E).
+* 3.0.0: First pass at incorporation of polyglot cloud capability

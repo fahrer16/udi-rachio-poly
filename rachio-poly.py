@@ -4,7 +4,13 @@ This is a NodeServer for Rachio irrigation controllers by fahrer16 (Brian Feeney
 Based on template for Polyglot v2 written in Python2/3 by Einstein.42 (James Milne) milne.james@gmail.com
 """
 
-import polyinterface
+CLOUD = False
+
+try:
+    import polyinterface
+except ImportError:
+    import pgc_interface as polyinterface
+    CLOUD = True
 import sys
 from socket import error as socket_error
 from copy import deepcopy
@@ -74,10 +80,12 @@ class Controller(polyinterface.Controller):
         _msg = "Connection timer created for node addition queue"
         self.timer = Timer(1,LOGGER.debug,[_msg])
         self.nodeAdditionInterval = 1
-        self.httpPort = 3001
+        self.port = 3001
         self.httpHost = ''
         self.device_id = ''
         self.use_ssl = False
+        self.wsConnectivityTestRequired = True
+        self._cloud = CLOUD
 
     def start(self):
         LOGGER.info('Starting Rachio Polyglot v2 NodeServer version {}'.format(VERSION))
@@ -95,18 +103,29 @@ class Controller(polyinterface.Controller):
             
         ###Start HTTP Server for Websockets####
         try:
-            if 'port' in self.polyConfig['customParams']:
-                self.httpPort = int(self.polyConfig['customParams']['port'])
+            if self._cloud:
+                if self.polyConfig['development']:
+                    self.port = self.polyConfig['customParams']['port']
+                else:
+                    self.port = self.poly.init['netInfo']['publicPort']
+            elif 'port' in self.polyConfig['customParams']:
+                self.port = int(self.polyConfig['customParams']['port'])
             else:
-                LOGGER.info('No HTTP Port specified in Rachio configuration for Websocket endpoint.  Using port %s for now.  Enter custom parameter of \'port\' in Polyglot configuration.', str(self.httpPort))
-            LOGGER.info('Ensure router/firewall is set to forward requests to polyglot host on port %s',str(self.httpPort))
+                LOGGER.info('No HTTP Port specified in Rachio configuration for Websocket endpoint.  Using port %s for now.  Enter custom parameter of \'port\' in Polyglot configuration.', str(self.port))
+            LOGGER.info('Ensure router/firewall is set to forward requests to polyglot host on port %s',str(self.port))
         except Exception as ex:
             LOGGER.error('Error reading webSocket Port from Polyglot Configuration: %s', str(ex))
             sys.exit(0)
             return False
             
         try:
-            if 'host' in self.polyConfig['customParams']:
+            if self._cloud:
+                self.worker = self.polyConfig['worker']
+                if self.polyConfig['development']:
+                    self.httpHost = self.polyConfig['customParams']['host']
+                else:
+                    self.httpHost = self.polyConfig['netInfo']['publicIp']
+            elif 'host' in self.polyConfig['customParams']:
                 self.httpHost = self.polyConfig['customParams']['host']
             else:
                 LOGGER.error('No HTTP Host specified in Rachio configuration for websocket endpoint.  Enter custom parameter of \'host\' in Polyglot configuration.')
@@ -116,12 +135,16 @@ class Controller(polyinterface.Controller):
             sys.exit(0)
             return False
 
-        if 'certfile' in self.polyConfig['customParams']:
-            certfile = self.polyConfig['customParams']['certfile']
+        if self._cloud:
+            LOGGER.debug('Using default certificate for Polyglot Cloud to host secure websocket endpoint')
+            certfile = '/app/certs/AmazonRootCA1.pem'
+        elif 'certfile' in self.polyConfig['customParams']:
+            certfile = self.polyConfig['customParams']['certfie']
             LOGGER.debug('Trying custom key file: {}'.format(certfile))
         else:
             certfile = 'certificate.pem'
             LOGGER.debug('Trying default key file: {}'.format(certfile))
+        
         if Path(certfile).is_file():
             LOGGER.debug('Certificate file exists, enabling SSL')
             self.use_ssl = True
@@ -130,8 +153,7 @@ class Controller(polyinterface.Controller):
         
         try:
             LOGGER.debug('Starting Websocket HTTP Server')
-            # self.webSocketServer = ThreadedHTTPServer(('', self.httpPort), webSocketHandler)
-            self.webSocketServer = HTTPServer(('', self.httpPort), webSocketHandler)
+            self.webSocketServer = HTTPServer(('', int(self.port)), webSocketHandler)
             self.webSocketServer.controller = self #To allow handler to access this class when receiving a request from Rachio servers
             if self.use_ssl:
                 try:
@@ -145,8 +167,9 @@ class Controller(polyinterface.Controller):
             sys.exit(0)
             return False
 
-        if self.testWebSocketConnectivity(self.httpHost, self.httpPort):
+        if self.testWebSocketConnectivity(self.httpHost, self.port):
             #Get Node Addition Interval from Polyglot Configuration (Added version 2.2.0)
+            self.wsConnectivityTestRequired = False
             try:
                 if 'nodeAdditionInterval' in self.polyConfig['customParams']:
                     _nodeAdditionInterval = self.polyConfig['customParams']['nodeAdditionInterval']
@@ -201,9 +224,9 @@ class Controller(polyinterface.Controller):
     def configureWebSockets(self, WS_deviceID):
         #Get the webSockets configured for the specified device.  Delete any older, inappropriate websockets and create new ones as needed
         if self.use_ssl:
-            _url = 'https://' + self.httpHost + ':' + str(self.httpPort)
+            _url = 'https://' + self.httpHost + ':' + str(self.port)
         else:
-            _url = 'http://' + self.httpHost + ':' + str(self.httpPort)
+            _url = 'http://' + self.httpHost + ':' + str(self.port)
         
         #Build event types array:
         _eventTypes = []
@@ -1102,13 +1125,16 @@ class webSocketHandler(BaseHTTPRequestHandler): #From example at https://gist.gi
             
             if 'deviceId' in _json_data:
                 _deviceID = _json_data['deviceId']
+                _devCount = 0
                 for node in self.server.controller.nodes:
                     if self.server.controller.nodes[node].device_id == _deviceID:
+                        _devCount += 1
                         self.server.controller.nodes[node].update_info(force=False,queryAPI=True)
                         break
                         
-                self.send_response(204) #v2.4.2: Removed http server response to invalid requests
-                self.end_headers()
+                if _devCount > 0:
+                    self.send_response(204) #v2.4.2: Removed http server response to invalid requests
+                    self.end_headers()
                         
         except Exception as ex:
             LOGGER.error('Error processing POST request to HTTP Server: %s', str(ex))
@@ -1117,7 +1143,7 @@ class webSocketHandler(BaseHTTPRequestHandler): #From example at https://gist.gi
             
     def do_GET(self):
         try:
-            if None != re.search('/test*', self.path):
+            if None != re.search('/test*', self.path) and self.server.controller.wsConnectivityTestRequired:
                 self.send_response(200)
                 self.send_header('Content-Type','application/json')
                 data = '{"success": "True"}'
@@ -1147,3 +1173,4 @@ if __name__ == "__main__":
         except:
             pass
         sys.exit(0)
+
