@@ -128,7 +128,7 @@ class Controller(polyinterface.Controller):
                 else:
                     #self.httpHost = self.polyConfig['netInfo']['publicIp']
                     self.httpHost = str(self.polyConfig['netInfo']['httpsIngress'])
-                    self.httpHost = self.httpHost.replace('https://',''),replace('/ns/' + self.worker + '/','')
+                    self.httpHost = self.httpHost.replace('https://','').replace('/ns/' + self.worker + '/','')
             elif 'host' in self.polyConfig['customParams']:
                 self.httpHost = self.polyConfig['customParams']['host']
             else:
