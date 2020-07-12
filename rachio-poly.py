@@ -337,7 +337,7 @@ class Controller(polyinterface.Controller):
         #Nothing to update for this node
         pass
 
-    def query(self):
+    def query(self, command = None):
         try:
             for node in self.nodes:
                 self.nodes[node].update_info(force=True)
@@ -1154,8 +1154,7 @@ class webSocketHandler(BaseHTTPRequestHandler): #From example at https://gist.gi
                 for node in self.server.controller.nodes:
                     if self.server.controller.nodes[node].device_id == _deviceID:
                         _devCount += 1
-                        self.server.controller.nodes[node].update_info(force=False,queryAPI=True)
-                        break
+                        self.server.controller.query()
                         
                 if _devCount > 0:
                     self.send_response(204) #v2.4.2: Removed http server response to invalid requests
