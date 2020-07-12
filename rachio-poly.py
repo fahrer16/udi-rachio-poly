@@ -107,8 +107,9 @@ class Controller(polyinterface.Controller):
                 if self.polyConfig['development']:
                     self.port = self.polyConfig['customParams']['port']
                 else:
-                    self.port = self.poly.init['netInfo']['publicPort']
-                    LOGGER.debug('httpsIngress = %s',str(self.polyConfig['netInfo']['httpsIngress']))         
+                    #self.port = self.poly.init['netInfo']['publicPort']
+                    #LOGGER.debug('httpsIngress = %s',str(self.polyConfig['netInfo']['httpsIngress']))      
+                    self.port = 443
             elif 'port' in self.polyConfig['customParams']:
                 self.port = int(self.polyConfig['customParams']['port'])
             else:
@@ -125,7 +126,9 @@ class Controller(polyinterface.Controller):
                 if self.polyConfig['development']:
                     self.httpHost = self.polyConfig['customParams']['host']
                 else:
-                    self.httpHost = self.polyConfig['netInfo']['publicIp']
+                    #self.httpHost = self.polyConfig['netInfo']['publicIp']
+                    self.httpHost = str(self.polyConfig['netInfo']['httpsIngress'])
+                    self.httpHost = self.httpHost.replace('https://',''),replace('/ns/' + self.worker + '/','')
             elif 'host' in self.polyConfig['customParams']:
                 self.httpHost = self.polyConfig['customParams']['host']
             else:
@@ -137,8 +140,9 @@ class Controller(polyinterface.Controller):
             return False
 
         if self._cloud:
-            LOGGER.debug('Using default certificate for Polyglot Cloud to host secure websocket endpoint')
-            certfile = '/app/certs/AmazonRootCA1.pem'
+            #LOGGER.debug('Using default certificate for Polyglot Cloud to host secure websocket endpoint')
+            #certfile = '/app/certs/AmazonRootCA1.pem'
+            pass
         elif 'certfile' in self.polyConfig['customParams']:
             certfile = self.polyConfig['customParams']['certfie']
             LOGGER.debug('Trying custom key file: {}'.format(certfile))
@@ -150,7 +154,8 @@ class Controller(polyinterface.Controller):
             LOGGER.debug('Certificate file exists, enabling SSL')
             self.use_ssl = True
         else:
-            LOGGER.debug('Can\'t locate certificate, SSL disabled')
+            if not self._cloud:
+                LOGGER.debug('Can\'t locate certificate, SSL disabled')
         
         try:
             _localPort = self.port
@@ -159,7 +164,7 @@ class Controller(polyinterface.Controller):
             LOGGER.debug('Starting Websocket HTTP Server on port %s',str(_localPort))
             self.webSocketServer = HTTPServer(('', int(_localPort)), webSocketHandler)
             self.webSocketServer.controller = self #To allow handler to access this class when receiving a request from Rachio servers
-            if self.use_ssl:
+            if self.use_ssl and not self._cloud:
                 try:
                     self.webSocketServer.socket = ssl.wrap_socket(self.webSocketServer.socket, certfile=certfile, server_side=True)
                 except Exception as ex:
@@ -196,13 +201,16 @@ class Controller(polyinterface.Controller):
         
     def testWebSocketConnectivity(self, host, port):
         try:
-            if self.use_ssl:
+            if self.use_ssl or self._cloud:
                 conn = http.client.HTTPSConnection(host, port=port)
             else:
                 conn = http.client.HTTPConnection(host, port=port)
             LOGGER.info('Testing connectivity to %s:%s', str(host), str(port))
             _headers = {'Content-Type': 'application/json'}
-            conn.request('GET', '/test', headers=_headers)
+            _prefix = ""
+            if self._cloud:
+                _prefix = '/ns/' + self.worker
+            conn.request('GET', _prefix + '/test', headers=_headers)
             _resp = conn.getresponse()
             content_type = _resp.getheader('Content-Type')
             conn.close()
@@ -227,8 +235,12 @@ class Controller(polyinterface.Controller):
             
     def configureWebSockets(self, WS_deviceID):
         #Get the webSockets configured for the specified device.  Delete any older, inappropriate websockets and create new ones as needed
-        if self.use_ssl:
-            _url = 'https://' + self.httpHost + ':' + str(self.port)
+        _prefix = ""
+            if self._cloud:
+                _prefix = '/ns/' + self.worker
+                
+        if self.use_ssl or self._cloud:
+            _url = 'https://' + _prefix + self.httpHost + ':' + str(self.port)
         else:
             _url = 'http://' + self.httpHost + ':' + str(self.port)
         
@@ -1151,6 +1163,13 @@ class webSocketHandler(BaseHTTPRequestHandler): #From example at https://gist.gi
                 self.send_response(200)
                 self.send_header('Content-Type','application/json')
                 data = '{"success": "True"}'
+                self.send_header('Content-Length', len(data))
+                self.end_headers()
+                self.wfile.write(data.encode('utf-8'))
+            elif self.server.controller._cloud:
+                self.send_response(200)
+                self.send_header('Content-Type','application/json')
+                data = 'Node server is healthy'
                 self.send_header('Content-Length', len(data))
                 self.end_headers()
                 self.wfile.write(data.encode('utf-8'))
