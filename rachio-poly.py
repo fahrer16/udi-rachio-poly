@@ -1163,14 +1163,17 @@ class webSocketHandler(BaseHTTPRequestHandler): #From example at https://gist.gi
             
     def do_GET(self):
         try:
-            if None != re.search('/test*', self.path) and self.server.controller.wsConnectivityTestRequired:
+            _prefix = ""
+            if self.server.controller._cloud:
+                _prefix = '/ns/' + self.server.controller.worker
+            if None != re.search(_prefix + '/test*', self.path) and self.server.controller.wsConnectivityTestRequired:
                 self.send_response(200)
                 self.send_header('Content-Type','application/json')
                 data = '{"success": "True"}'
                 self.send_header('Content-Length', len(data))
                 self.end_headers()
                 self.wfile.write(data.encode('utf-8'))
-            elif self.server.controller._cloud:
+            elif None != re.search(prefix + '/', self.path):
                 self.send_response(200)
                 self.send_header('Content-Type','application/json')
                 data = 'Node server is healthy'
