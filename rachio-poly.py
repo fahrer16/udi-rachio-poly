@@ -114,7 +114,10 @@ class Controller(polyinterface.Controller):
                 self.port = int(self.polyConfig['customParams']['port'])
             else:
                 LOGGER.info('No HTTP Port specified in Rachio configuration for Websocket endpoint.  Using port %s for now.  Enter custom parameter of \'port\' in Polyglot configuration.', str(self.port))
-            LOGGER.info('Ensure router/firewall is set to forward requests to polyglot host on port %s',str(self.port))
+            
+            if not self._cloud:
+                LOGGER.info('Ensure router/firewall is set to forward requests to polyglot host on port %s',str(self.port))
+                
         except Exception as ex:
             LOGGER.error('Error reading webSocket Port from Polyglot Configuration: %s', str(ex))
             sys.exit(0)
@@ -203,12 +206,14 @@ class Controller(polyinterface.Controller):
         try:
             if self._cloud:
                 conn = http.client.HTTPSConnection(host)
+                LOGGER.info('Testing connectivity to polyglot cloud webhook handler', str(host), str(port))
             elif self.use_ssl:
                 conn = http.client.HTTPSConnection(host, port=port)
+                LOGGER.info('Testing connectivity to %s:%s', str(host), str(port))
             else:
                 conn = http.client.HTTPConnection(host, port=port)
-            
-            LOGGER.info('Testing connectivity to %s:%s', str(host), str(port))
+                LOGGER.info('Testing connectivity to %s:%s', str(host), str(port))
+                
             _headers = {'Content-Type': 'application/json'}
             _prefix = ""
             if self._cloud:
@@ -234,7 +239,7 @@ class Controller(polyinterface.Controller):
                 LOGGER.error('Connectivity test to %s:%s was not successful, unexpected response', str(host), str(port))
                 return False
         except Exception as ex:
-            LOGGER.error('Error reaching specified host:port externally (%s:%s).  Please ensure entries are correct and the appropriate firewall ports have been opened: %s', str(host), str(port), str(ex))
+            LOGGER.error('Error reaching specified host:port externally (%s:%s).  Please ensure entries are correct and the appropriate firewall ports have been opened (for local installs): %s', str(host), str(port), str(ex))
             return False
             
     def configureWebSockets(self, WS_deviceID):
@@ -1163,20 +1168,12 @@ class webSocketHandler(BaseHTTPRequestHandler): #From example at https://gist.gi
             
     def do_GET(self):
         try:
-            _prefix = ""
-            if self.server.controller._cloud:
-                _prefix = '/ns/' + self.server.controller.worker
-            if None != re.search(_prefix + '/test*', self.path) and self.server.controller.wsConnectivityTestRequired:
+            #_prefix = ""
+            #_prefix = '/ns/' + self.server.controller.worker
+            if self.server.controller.wsConnectivityTestRequired or self.server.controller._cloud:
                 self.send_response(200)
                 self.send_header('Content-Type','application/json')
                 data = '{"success": "True"}'
-                self.send_header('Content-Length', len(data))
-                self.end_headers()
-                self.wfile.write(data.encode('utf-8'))
-            elif None != re.search(prefix + '/', self.path):
-                self.send_response(200)
-                self.send_header('Content-Type','application/json')
-                data = 'Node server is healthy'
                 self.send_header('Content-Length', len(data))
                 self.end_headers()
                 self.wfile.write(data.encode('utf-8'))
