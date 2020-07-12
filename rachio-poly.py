@@ -108,7 +108,7 @@ class Controller(polyinterface.Controller):
                     self.port = self.polyConfig['customParams']['port']
                 else:
                     self.port = self.poly.init['netInfo']['publicPort']
-                    LOGGER.debug('httpsIngress = %s',str(self.polyConfig['netInfo']['httpsIngress'])         
+                    LOGGER.debug('httpsIngress = %s',str(self.polyConfig['netInfo']['httpsIngress']))         
             elif 'port' in self.polyConfig['customParams']:
                 self.port = int(self.polyConfig['customParams']['port'])
             else:
