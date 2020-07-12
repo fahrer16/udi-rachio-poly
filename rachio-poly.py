@@ -245,11 +245,10 @@ class Controller(polyinterface.Controller):
             
     def configureWebSockets(self, WS_deviceID):
         #Get the webhooks configured for the specified device.  Delete any older, inappropriate webhooks and create new ones as needed
-        _prefix = ""
         if self._cloud:
             _prefix = '/ns/' + self.worker
-                
-        if self.use_ssl or self._cloud:
+            _url = 'http://' +self.httpHost + '/ns/' + self.worker  
+        elif self.use_ssl:
             _url = 'https://' + _prefix + self.httpHost + ':' + str(self.port)
         else:
             _url = 'http://' + self.httpHost + ':' + str(self.port)
