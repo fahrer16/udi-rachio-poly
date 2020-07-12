@@ -236,8 +236,8 @@ class Controller(polyinterface.Controller):
     def configureWebSockets(self, WS_deviceID):
         #Get the webSockets configured for the specified device.  Delete any older, inappropriate websockets and create new ones as needed
         _prefix = ""
-            if self._cloud:
-                _prefix = '/ns/' + self.worker
+        if self._cloud:
+            _prefix = '/ns/' + self.worker
                 
         if self.use_ssl or self._cloud:
             _url = 'https://' + _prefix + self.httpHost + ':' + str(self.port)
