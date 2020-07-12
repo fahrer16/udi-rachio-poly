@@ -178,7 +178,10 @@ class Controller(polyinterface.Controller):
             LOGGER.error('Error starting webSocket server: %s', str(ex))
             sys.exit(0)
             return False
-
+        
+        if self._cloud:
+            time.sleep(3) #cloud seems slower when creating the http Server, giving it some time to spin it up before checking it
+            
         if self.testWebSocketConnectivity(self.httpHost, self.port):
             #Get Node Addition Interval from Polyglot Configuration (Added version 2.2.0)
             self.wsConnectivityTestRequired = False
@@ -222,9 +225,9 @@ class Controller(polyinterface.Controller):
             _resp = conn.getresponse()
             content_type = _resp.getheader('Content-Type')
             conn.close()
-            LOGGER.debug('Websocket connectivity test response = %s',str(_resp))
             if content_type and content_type.startswith('application/json'):
                 _respContent = _resp.read().decode()
+                LOGGER.debug('Websocket connectivity test response = %s',str(_respContent))
                 _content = json.loads(_respContent)
                 if 'success' in _content:
                     if _content['success'] == "True":
