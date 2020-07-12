@@ -1154,7 +1154,7 @@ class webSocketHandler(BaseHTTPRequestHandler): #From example at https://gist.gi
                 for node in self.server.controller.nodes:
                     if self.server.controller.nodes[node].device_id == _deviceID:
                         _devCount += 1
-                        self.server.controller.query()
+                        self.server.controller.nodes[node].update_info(force=False,queryAPI=True)
                         
                 if _devCount > 0:
                     self.send_response(204) #v2.4.2: Removed http server response to invalid requests
