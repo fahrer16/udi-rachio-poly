@@ -206,7 +206,7 @@ class Controller(polyinterface.Controller):
         try:
             if self._cloud:
                 conn = http.client.HTTPSConnection(host)
-                LOGGER.info('Testing connectivity to polyglot cloud webhook handler', str(host), str(port))
+                LOGGER.info('Testing connectivity to polyglot cloud webhook handler')
             elif self.use_ssl:
                 conn = http.client.HTTPSConnection(host, port=port)
                 LOGGER.info('Testing connectivity to %s:%s', str(host), str(port))
