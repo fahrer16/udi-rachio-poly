@@ -247,7 +247,7 @@ class Controller(polyinterface.Controller):
         #Get the webhooks configured for the specified device.  Delete any older, inappropriate webhooks and create new ones as needed
         if self._cloud:
             _prefix = '/ns/' + self.worker
-            _url = 'http://' +self.httpHost + '/ns/' + self.worker  
+            _url = 'http://' +self.httpHost + '/ns/' + self.worker + '/'
         elif self.use_ssl:
             _url = 'https://' + _prefix + self.httpHost + ':' + str(self.port)
         else:
