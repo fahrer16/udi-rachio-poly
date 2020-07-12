@@ -142,7 +142,7 @@ class Controller(polyinterface.Controller):
         if self._cloud:
             #LOGGER.debug('Using default certificate for Polyglot Cloud to host secure websocket endpoint')
             #certfile = '/app/certs/AmazonRootCA1.pem'
-            pass
+            certfile = ''
         elif 'certfile' in self.polyConfig['customParams']:
             certfile = self.polyConfig['customParams']['certfie']
             LOGGER.debug('Trying custom key file: {}'.format(certfile))
