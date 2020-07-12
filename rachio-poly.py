@@ -108,6 +108,7 @@ class Controller(polyinterface.Controller):
                     self.port = self.polyConfig['customParams']['port']
                 else:
                     self.port = self.poly.init['netInfo']['publicPort']
+                    LOGGER.debug('httpsIngress = %s',str(self.polyConfig['netInfo']['httpsIngress'])         
             elif 'port' in self.polyConfig['customParams']:
                 self.port = int(self.polyConfig['customParams']['port'])
             else:
@@ -152,10 +153,10 @@ class Controller(polyinterface.Controller):
             LOGGER.debug('Can\'t locate certificate, SSL disabled')
         
         try:
-            LOGGER.debug('Starting Websocket HTTP Server')
             _localPort = self.port
             if self._cloud:
                 _localPort = 3000
+            LOGGER.debug('Starting Websocket HTTP Server on port %s',str(_localPort)
             self.webSocketServer = HTTPServer(('', int(_localPort)), webSocketHandler)
             self.webSocketServer.controller = self #To allow handler to access this class when receiving a request from Rachio servers
             if self.use_ssl:
