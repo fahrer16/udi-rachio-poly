@@ -80,8 +80,6 @@ class Controller(polyinterface.Controller):
         _msg = "Connection timer created for node addition queue"
         self.timer = Timer(1,LOGGER.debug,[_msg])
         self.nodeAdditionInterval = 1
-        _WSmsg = "Webhook connectivity delay timer"
-        self.WStimer = Timer(0.5,LOGGER.debug,[_WSmsg])
         self.port = 3001
         self.httpHost = ''
         self.device_id = ''
@@ -181,16 +179,7 @@ class Controller(polyinterface.Controller):
             sys.exit(0)
             return False
         
-        if self._cloud:
-            _duration = 5
-        else:
-            _duration = 0.5
-        self._testWebSocketConnectivityDelayTimer(_duration)
-        ##End of start routine, will be continued after delay by the _testWebSocketConnectivityDelayTimer, which will call the _continueStart routine below
-            
-    def _continueStart(self):
-        LOGGER.debug("Continuing startup...")
-        if self.testWebSocketConnectivity(self.httpHost, self.port):
+        if self.testWebSocketConnectivity(self.httpHost, self.port) or self._cloud:
             #Get Node Addition Interval from Polyglot Configuration (Added version 2.2.0)
             self.wsConnectivityTestRequired = False
             try:
@@ -211,18 +200,7 @@ class Controller(polyinterface.Controller):
             sys.exit(0)
         
         LOGGER.debug('Rachio "start" routine complete')
-    
-    def _testWebSocketConnectivityDelayTimer(self, duration):
-        try:
-            if self.WStimer is not None:
-                self.WStimer.cancel()
-            self.WStimer = Timer(duration, self._continueStart)
-            self.WStimer.start()
-            LOGGER.debug("Starting webhook connectivity delay timer for %s second(s)", str(duration))
-            return True
-        except Exception as ex:
-            LOGGER.error('Error starting webhook connectivity delay timer: %s', str(ex))
-            return False
+        
         
     def testWebSocketConnectivity(self, host, port):
         try:
