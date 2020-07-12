@@ -201,10 +201,13 @@ class Controller(polyinterface.Controller):
         
     def testWebSocketConnectivity(self, host, port):
         try:
-            if self.use_ssl or self._cloud:
+            if self._cloud:
+                conn = http.client.HTTPSConnection(host)
+            elif self.use_ssl:
                 conn = http.client.HTTPSConnection(host, port=port)
             else:
                 conn = http.client.HTTPConnection(host, port=port)
+            
             LOGGER.info('Testing connectivity to %s:%s', str(host), str(port))
             _headers = {'Content-Type': 'application/json'}
             _prefix = ""
@@ -216,6 +219,7 @@ class Controller(polyinterface.Controller):
             conn.close()
             if content_type and content_type.startswith('application/json'):
                 _content = json.loads(_resp.read().decode())
+                LOGGER.debug('Websocket connectivity test response = %s',str(_content))
                 if 'success' in _content:
                     if _content['success'] == "True":
                         LOGGER.info('Connectivity test to %s:%s succeeded', str(host), str(port))
