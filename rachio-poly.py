@@ -223,8 +223,9 @@ class Controller(polyinterface.Controller):
             content_type = _resp.getheader('Content-Type')
             conn.close()
             if content_type and content_type.startswith('application/json'):
-                _content = json.loads(_resp.read().decode())
-                LOGGER.debug('Websocket connectivity test response = %s',str(_content))
+                _respContent = _resp.read().decode()
+                LOGGER.debug('Websocket connectivity test response = %s',str(_respContent))
+                _content = json.loads(_respContent)
                 if 'success' in _content:
                     if _content['success'] == "True":
                         LOGGER.info('Connectivity test to %s:%s succeeded', str(host), str(port))
