@@ -80,6 +80,8 @@ class Controller(polyinterface.Controller):
         _msg = "Connection timer created for node addition queue"
         self.timer = Timer(1,LOGGER.debug,[_msg])
         self.nodeAdditionInterval = 1
+        _WSmsg = "Webhook connectivity delay timer"
+        self.WStimer = Timer(0.5,LOGGER.debug,[_WSmsg])
         self.port = 3001
         self.httpHost = ''
         self.device_id = ''
@@ -101,7 +103,7 @@ class Controller(polyinterface.Controller):
             LOGGER.error('Error reading Rachio API Key from Polyglot Configuration: %s', str(ex))
             return False
             
-        ###Start HTTP Server for Websockets####
+        ###Start HTTP Server for Webhooks####
         try:
             if self._cloud:
                 if self.polyConfig['development']:
@@ -113,13 +115,13 @@ class Controller(polyinterface.Controller):
             elif 'port' in self.polyConfig['customParams']:
                 self.port = int(self.polyConfig['customParams']['port'])
             else:
-                LOGGER.info('No HTTP Port specified in Rachio configuration for Websocket endpoint.  Using port %s for now.  Enter custom parameter of \'port\' in Polyglot configuration.', str(self.port))
+                LOGGER.info('No HTTP Port specified in Rachio configuration for Webhook endpoint.  Using port %s for now.  Enter custom parameter of \'port\' in Polyglot configuration.', str(self.port))
             
             if not self._cloud:
                 LOGGER.info('Ensure router/firewall is set to forward requests to polyglot host on port %s',str(self.port))
                 
         except Exception as ex:
-            LOGGER.error('Error reading webSocket Port from Polyglot Configuration: %s', str(ex))
+            LOGGER.error('Error reading webhook Port from Polyglot Configuration: %s', str(ex))
             sys.exit(0)
             return False
             
@@ -135,15 +137,15 @@ class Controller(polyinterface.Controller):
             elif 'host' in self.polyConfig['customParams']:
                 self.httpHost = self.polyConfig['customParams']['host']
             else:
-                LOGGER.error('No HTTP Host specified in Rachio configuration for websocket endpoint.  Enter custom parameter of \'host\' in Polyglot configuration.')
+                LOGGER.error('No HTTP Host specified in Rachio configuration for webhook endpoint.  Enter custom parameter of \'host\' in Polyglot configuration.')
                 sys.exit(0)
         except Exception as ex:
-            LOGGER.error('Error reading webSocket host name from Polyglot Configuration: %s', str(ex))
+            LOGGER.error('Error reading webhook host name from Polyglot Configuration: %s', str(ex))
             sys.exit(0)
             return False
 
         if self._cloud:
-            #LOGGER.debug('Using default certificate for Polyglot Cloud to host secure websocket endpoint')
+            #LOGGER.debug('Using default certificate for Polyglot Cloud to host secure webhook endpoint')
             #certfile = '/app/certs/AmazonRootCA1.pem'
             certfile = ''
         elif 'certfile' in self.polyConfig['customParams']:
@@ -164,7 +166,7 @@ class Controller(polyinterface.Controller):
             _localPort = self.port
             if self._cloud:
                 _localPort = 3000
-            LOGGER.debug('Starting Websocket HTTP Server on port %s',str(_localPort))
+            LOGGER.debug('Starting Webhook Server on port %s',str(_localPort))
             self.webSocketServer = HTTPServer(('', int(_localPort)), webSocketHandler)
             self.webSocketServer.controller = self #To allow handler to access this class when receiving a request from Rachio servers
             if self.use_ssl and not self._cloud:
@@ -175,13 +177,18 @@ class Controller(polyinterface.Controller):
                     self.use_ssl = False
             self.httpThread = threading.Thread(target=self.webSocketServer.serve_forever, daemon=True).start()
         except Exception as ex:
-            LOGGER.error('Error starting webSocket server: %s', str(ex))
+            LOGGER.error('Error starting webhook server: %s', str(ex))
             sys.exit(0)
             return False
         
         if self._cloud:
-            time.sleep(5) #cloud seems slower when creating the http Server, giving it some time to spin it up before checking it
+            _duration = 5
+        else:
+            _duration = 0.5
+        self._testWebSocketConnectivityDelayTimer(_duration)
+        ##End of start, will be continued after delay by the _testWebSocketConnectivityDelayTimer, which will call the _continueStart routine below
             
+    def _continueStart(self):
         if self.testWebSocketConnectivity(self.httpHost, self.port):
             #Get Node Addition Interval from Polyglot Configuration (Added version 2.2.0)
             self.wsConnectivityTestRequired = False
@@ -199,16 +206,27 @@ class Controller(polyinterface.Controller):
 
             self.discover()
         else:
-            LOGGER.error('Websocket connectivity test failed, exiting')
+            LOGGER.error('Webhook connectivity test failed, exiting')
             sys.exit(0)
-            
         
         LOGGER.debug('Rachio "start" routine complete')
+    
+    def _testWebSocketConnectivityDelayTimer(self, duration):
+        try:
+            if self.WStimer is not None:
+                self.WStimer.cancel()
+            self.WStimer = Timer(duration, self._continueStart())
+            self.WStimer.start()
+            LOGGER.debug("Starting webhook connectivity delay timer for %s second(s)", str(self.nodeAdditionInterval))
+            return True
+        except Exception as ex:
+            LOGGER.error('Error starting webhook connectivity delay timer: %s', str(ex))
+            return False
         
     def testWebSocketConnectivity(self, host, port):
         try:
             if self._cloud:
-                conn = http.client.HTTPConnection(host)
+                conn = http.client.HTTPSConnection(host)
                 LOGGER.info('Testing connectivity to polyglot cloud webhook handler')
             elif self.use_ssl:
                 conn = http.client.HTTPSConnection(host, port=port)
@@ -227,7 +245,7 @@ class Controller(polyinterface.Controller):
             conn.close()
             if content_type and content_type.startswith('application/json'):
                 _respContent = _resp.read().decode()
-                LOGGER.debug('Websocket connectivity test response = %s',str(_respContent))
+                LOGGER.debug('Webhook connectivity test response = %s',str(_respContent))
                 _content = json.loads(_respContent)
                 if 'success' in _content:
                     if _content['success'] == "True":
@@ -247,7 +265,7 @@ class Controller(polyinterface.Controller):
             return False
             
     def configureWebSockets(self, WS_deviceID):
-        #Get the webSockets configured for the specified device.  Delete any older, inappropriate websockets and create new ones as needed
+        #Get the webhooks configured for the specified device.  Delete any older, inappropriate webhooks and create new ones as needed
         _prefix = ""
         if self._cloud:
             _prefix = '/ns/' + self.worker
@@ -269,19 +287,19 @@ class Controller(polyinterface.Controller):
             _wsId = ''
             for _websocket in _ws[1]:
                 if 'externalId' in _websocket and 'url' in _websocket and 'id' in _websocket and 'eventTypes' in _websocket:
-                    if _websocket['externalId'] == 'polyglot' and not _websocketFound: #This is the first polyglot-created websocket
+                    if _websocket['externalId'] == 'polyglot' and not _websocketFound: #This is the first polyglot-created webhook
                         if _url not in _websocket['url']:
-                            #Polyglot websocket but url does not match currently configured host and port
-                            LOGGER.info('Websocket %s found but url (%s) is not correct, updating to %s', str(_websocket['id']), str(_websocket['url']), _url)
+                            #Polyglot webhook but url does not match currently configured host and port
+                            LOGGER.info('Webhook %s found but url (%s) is not correct, updating to %s', str(_websocket['id']), str(_websocket['url']), _url)
                             try:
                                 _updateWS = self.r_api.notification.putWebhook(_websocket['id'], 'polyglot', _url, _eventTypes)
                                 LOGGER.debug('Updated webhook %s, %s/%s API requests remaining until %s', str(_websocket['id']), str(_updateWS[0]['x-ratelimit-remaining']), str(_updateWS[0]['x-ratelimit-limit']),str(_updateWS[0]['x-ratelimit-reset']))
                                 _websocketFound = True
                                 _wsId = _websocket['id']
                             except Exception as ex:
-                                LOGGER.error('Error updating websocket %s url to "%s": %s', str(_websocket['id']), str(_url), str(ex))
+                                LOGGER.error('Error updating webhook %s url to "%s": %s', str(_websocket['id']), str(_url), str(ex))
                         else:
-                            #URL is OK, check that all websocket event types are included:
+                            #URL is OK, check that all webhook event types are included:
                             _allEventsPresent = True
                             for key, value in WS_EVENT_TYPES.items():
                                 _found = False
@@ -295,36 +313,36 @@ class Controller(polyinterface.Controller):
                                     _allEventsPresent = False
                             
                             if not _allEventsPresent:
-                                #at least one websocket event is missing from the definition on the Rachio servers, updated the websocket:
-                                LOGGER.info('Websocket %s found but websocket event is missing, updating', str(_websocket['id']))
+                                #at least one websocket event is missing from the definition on the Rachio servers, updated the webhook:
+                                LOGGER.info('Webhook %s found but webhook event is missing, updating', str(_websocket['id']))
                                 try:
                                     _updateWS = self.r_api.notification.putWebhook(_websocket['id'], 'polyglot', _url, _eventTypes)
                                     LOGGER.debug('Updated webhook %s, %s/%s API requests remaining until %s', str(_websocket['id']), str(_updateWS[0]['x-ratelimit-remaining']), str(_updateWS[0]['x-ratelimit-limit']),str(_updateWS[0]['x-ratelimit-reset']))
                                     _websocketFound = True
                                     _wsId = _websocket['id']
                                 except Exception as ex:
-                                    LOGGER.error('Error updating websocket %s events: %s', str(_websocket['id']), str(ex))
+                                    LOGGER.error('Error updating webhook %s events: %s', str(_websocket['id']), str(ex))
                             else:
-                                #Websocket definition is OK!
+                                #Webshook definition is OK!
                                 _websocketFound = True
                                 _wsId = _websocket['id']
                                 
-                    elif  _websocket['externalId'] == 'polyglot' and _websocketFound: #This is an additional polyglot-created websocket
-                        LOGGER.info('Polyglot websocket %s found but polyglot already has a websocket defined (%s).  Deleting this websocket', str(_websocket['id']), str(_wsId))
+                    elif  _websocket['externalId'] == 'polyglot' and _websocketFound: #This is an additional polyglot-created webhook
+                        LOGGER.info('Polyglot webhook %s found but polyglot already has a webhook defined (%s).  Deleting this webhook', str(_websocket['id']), str(_wsId))
                         _deleteWs = self.r_api.notification.deleteWebhook(_websocket['id'])
                         LOGGER.debug('Deleted webhook %s, %s/%s API requests remaining until %s', str(_websocket['id']), str(_deleteWS[0]['x-ratelimit-remaining']), str(_deleteWS[0]['x-ratelimit-limit']),str(_deleteWS[0]['x-ratelimit-reset']))
             
             if not _websocketFound:
-                #No Polyglot websockets were found, create one:
-                LOGGER.info('No Polyglot websockets were found for device %s, creating a new websocket for Polyglot', str(WS_deviceID))
+                #No Polyglot webhooks were found, create one:
+                LOGGER.info('No Polyglot webhooks were found for device %s, creating a new webhook for Polyglot', str(WS_deviceID))
                 try:
                     _createWS = self.r_api.notification.postWebhook(WS_deviceID, 'polyglot', _url, _eventTypes)
                     _resp = str(_createWS[1])
                     LOGGER.debug('Created webhook for device %s. "%s". %s/%s API requests remaining until %s', str(WS_deviceID), str(_resp), str(_createWS[0]['x-ratelimit-remaining']), str(_createWS[0]['x-ratelimit-limit']),str(_createWS[0]['x-ratelimit-reset']))
                 except Exception as ex:
-                    LOGGER.error('Error creating websocket for device %s: %s', str(WS_deviceID), str(ex))
+                    LOGGER.error('Error creating webhook for device %s: %s', str(WS_deviceID), str(ex))
         except Exception as ex:
-            LOGGER.error('Error configuring websockets for device %s: %s', str(WS_deviceID), str(ex))
+            LOGGER.error('Error configuring webhooks for device %s: %s', str(WS_deviceID), str(ex))
 
     
     def shortPoll(self):
@@ -1150,7 +1168,7 @@ class webSocketHandler(BaseHTTPRequestHandler): #From example at https://gist.gi
         try:
             self.data_string = self.rfile.read(int(self.headers['Content-Length'])).decode('utf-8')
             _json_data = json.loads(self.data_string)
-            LOGGER.debug('Received websocket notification from Rachio: %s',str(_json_data))
+            LOGGER.debug('Received webhook notification from Rachio: %s',str(_json_data))
             
             if 'deviceId' in _json_data:
                 _deviceID = _json_data['deviceId']
