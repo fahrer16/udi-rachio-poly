@@ -186,9 +186,10 @@ class Controller(polyinterface.Controller):
         else:
             _duration = 0.5
         self._testWebSocketConnectivityDelayTimer(_duration)
-        ##End of start, will be continued after delay by the _testWebSocketConnectivityDelayTimer, which will call the _continueStart routine below
+        ##End of start routine, will be continued after delay by the _testWebSocketConnectivityDelayTimer, which will call the _continueStart routine below
             
     def _continueStart(self):
+        LOGGER.debug("Continuing startup...", str(self.nodeAdditionInterval))
         if self.testWebSocketConnectivity(self.httpHost, self.port):
             #Get Node Addition Interval from Polyglot Configuration (Added version 2.2.0)
             self.wsConnectivityTestRequired = False
