@@ -180,7 +180,7 @@ class Controller(polyinterface.Controller):
             return False
         
         if self._cloud:
-            time.sleep(3) #cloud seems slower when creating the http Server, giving it some time to spin it up before checking it
+            time.sleep(5) #cloud seems slower when creating the http Server, giving it some time to spin it up before checking it
             
         if self.testWebSocketConnectivity(self.httpHost, self.port):
             #Get Node Addition Interval from Polyglot Configuration (Added version 2.2.0)
