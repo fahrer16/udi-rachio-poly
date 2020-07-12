@@ -189,7 +189,7 @@ class Controller(polyinterface.Controller):
         ##End of start routine, will be continued after delay by the _testWebSocketConnectivityDelayTimer, which will call the _continueStart routine below
             
     def _continueStart(self):
-        LOGGER.debug("Continuing startup...", str(self.nodeAdditionInterval))
+        LOGGER.debug("Continuing startup...")
         if self.testWebSocketConnectivity(self.httpHost, self.port):
             #Get Node Addition Interval from Polyglot Configuration (Added version 2.2.0)
             self.wsConnectivityTestRequired = False
@@ -218,7 +218,7 @@ class Controller(polyinterface.Controller):
                 self.WStimer.cancel()
             self.WStimer = Timer(duration, self._continueStart)
             self.WStimer.start()
-            LOGGER.debug("Starting webhook connectivity delay timer for %s second(s)", str(self.nodeAdditionInterval))
+            LOGGER.debug("Starting webhook connectivity delay timer for %s second(s)", str(duration))
             return True
         except Exception as ex:
             LOGGER.error('Error starting webhook connectivity delay timer: %s', str(ex))
