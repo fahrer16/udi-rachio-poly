@@ -216,7 +216,7 @@ class Controller(polyinterface.Controller):
         try:
             if self.WStimer is not None:
                 self.WStimer.cancel()
-            self.WStimer = Timer(duration, self._continueStart())
+            self.WStimer = Timer(duration, self._continueStart)
             self.WStimer.start()
             LOGGER.debug("Starting webhook connectivity delay timer for %s second(s)", str(self.nodeAdditionInterval))
             return True
