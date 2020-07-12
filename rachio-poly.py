@@ -156,7 +156,7 @@ class Controller(polyinterface.Controller):
             _localPort = self.port
             if self._cloud:
                 _localPort = 3000
-            LOGGER.debug('Starting Websocket HTTP Server on port %s',str(_localPort)
+            LOGGER.debug('Starting Websocket HTTP Server on port %s',str(_localPort))
             self.webSocketServer = HTTPServer(('', int(_localPort)), webSocketHandler)
             self.webSocketServer.controller = self #To allow handler to access this class when receiving a request from Rachio servers
             if self.use_ssl:
