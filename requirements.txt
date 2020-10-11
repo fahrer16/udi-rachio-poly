@@ -1,2 +1,2 @@
 polyinterface>=2.0.0
-rachiopy>=0.1.2
+rachiopy==0.1.2
