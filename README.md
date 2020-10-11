@@ -37,3 +37,4 @@ Any Rachio units associated with the specified API key should now show up in the
 * 2.4.1: Corrected bug where error is generated if 'port' configuration parameter not defined.  Added closure of server.json file.
 * 2.4.2: Corrected bug on setting controller active zone when watering.  Removed http server response to invalid requests.
 * 3.0.0: First pass at incorporation of polyglot cloud capability
+* 3.0.1: Updated reference to rachiopy project to force usage of older version
