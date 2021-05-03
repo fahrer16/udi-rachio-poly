@@ -65,7 +65,7 @@
       <sends />
       <accepts>
         <cmd id="START">
-          <p id="" editor="minutes" init="2" />
+          <p id="" editor="minutes" />
         </cmd>
         <cmd id="QUERY" />
       </accepts>
